@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Nevolution.App.Cli/Nevolution.App.Cli.csproj" />
+    <Project Path="src/Nevolution.App.Desktop/Nevolution.App.Desktop.csproj" />
+    <Project Path="src/Nevolution.Core/Nevolution.Core.csproj" />
+    <Project Path="src/Nevolution.Infrastructure/Nevolution.Infrastructure.csproj" />
+  </Folder>
+</Solution>

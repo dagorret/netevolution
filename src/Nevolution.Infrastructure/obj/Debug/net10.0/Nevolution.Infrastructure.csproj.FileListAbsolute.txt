@@ -1,0 +1,15 @@
+/home/carlos/work/netevolution/src/Nevolution.Infrastructure/obj/Debug/net10.0/Nevolution.Infrastructure.csproj.AssemblyReference.cache
+/home/carlos/work/netevolution/src/Nevolution.Infrastructure/obj/Debug/net10.0/Nevolution.Infrastructure.GeneratedMSBuildEditorConfig.editorconfig
+/home/carlos/work/netevolution/src/Nevolution.Infrastructure/obj/Debug/net10.0/Nevolution.Infrastructure.AssemblyInfoInputs.cache
+/home/carlos/work/netevolution/src/Nevolution.Infrastructure/obj/Debug/net10.0/Nevolution.Infrastructure.AssemblyInfo.cs
+/home/carlos/work/netevolution/src/Nevolution.Infrastructure/obj/Debug/net10.0/Nevolution.Infrastructure.csproj.CoreCompileInputs.cache
+/home/carlos/work/netevolution/src/Nevolution.Infrastructure/bin/Debug/net10.0/Nevolution.Infrastructure.deps.json
+/home/carlos/work/netevolution/src/Nevolution.Infrastructure/bin/Debug/net10.0/Nevolution.Infrastructure.dll
+/home/carlos/work/netevolution/src/Nevolution.Infrastructure/bin/Debug/net10.0/Nevolution.Infrastructure.pdb
+/home/carlos/work/netevolution/src/Nevolution.Infrastructure/bin/Debug/net10.0/Nevolution.Core.dll
+/home/carlos/work/netevolution/src/Nevolution.Infrastructure/bin/Debug/net10.0/Nevolution.Core.pdb
+/home/carlos/work/netevolution/src/Nevolution.Infrastructure/obj/Debug/net10.0/Nevoluti.5C236AF1.Up2Date
+/home/carlos/work/netevolution/src/Nevolution.Infrastructure/obj/Debug/net10.0/Nevolution.Infrastructure.dll
+/home/carlos/work/netevolution/src/Nevolution.Infrastructure/obj/Debug/net10.0/refint/Nevolution.Infrastructure.dll
+/home/carlos/work/netevolution/src/Nevolution.Infrastructure/obj/Debug/net10.0/Nevolution.Infrastructure.pdb
+/home/carlos/work/netevolution/src/Nevolution.Infrastructure/obj/Debug/net10.0/ref/Nevolution.Infrastructure.dll

@@ -1,0 +1,83 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:models="using:Nevolution.Core.Models"
+        xmlns:viewModels="using:Nevolution.App.Desktop.ViewModels"
+        mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="450"
+        x:Class="Nevolution.App.Desktop.MainWindow"
+        x:DataType="viewModels:MainViewModel"
+        Width="900"
+        Height="600"
+        Title="Nevolution">
+    <Grid RowDefinitions="Auto,*" ColumnDefinitions="2*,3*">
+        <StackPanel Grid.Row="0" Grid.ColumnSpan="2" Margin="10" Spacing="8">
+            <ComboBox ItemsSource="{Binding Accounts}"
+                      SelectedItem="{Binding SelectedAccount}">
+                <ComboBox.ItemTemplate>
+                    <DataTemplate x:DataType="models:MailAccount">
+                        <StackPanel>
+                            <TextBlock Text="{Binding DisplayName}" />
+                            <TextBlock Text="{Binding Email}" FontSize="11" />
+                        </StackPanel>
+                    </DataTemplate>
+                </ComboBox.ItemTemplate>
+            </ComboBox>
+            <ComboBox ItemsSource="{Binding Folders}"
+                      SelectedItem="{Binding SelectedFolder}">
+                <ComboBox.ItemTemplate>
+                    <DataTemplate x:DataType="models:MailFolderInfo">
+                        <TextBlock Text="{Binding DisplayName}" />
+                    </DataTemplate>
+                </ComboBox.ItemTemplate>
+            </ComboBox>
+            <StackPanel Orientation="Horizontal" Spacing="8">
+                <TextBox Width="260"
+                         PlaceholderText="Filtrar por asunto"
+                         Text="{Binding FilterText}" />
+                <CheckBox Content="No leidos"
+                          IsChecked="{Binding ShowUnreadOnly}" />
+            </StackPanel>
+            <TextBlock Text="{Binding AccountStatusMessage}"
+                       IsVisible="{Binding HasAccountStatusMessage}"
+                       Foreground="IndianRed"
+                       TextWrapping="Wrap" />
+        </StackPanel>
+
+        <Grid Grid.Row="1" Grid.Column="0" RowDefinitions="*,Auto">
+            <ListBox Grid.Row="0"
+                     ItemsSource="{Binding Emails}"
+                     SelectedItem="{Binding SelectedEmail}">
+                <ListBox.ItemTemplate>
+                    <DataTemplate x:DataType="models:EmailMessage">
+                        <StackPanel Margin="5">
+                            <TextBlock Text="{Binding Subject}" FontWeight="Bold"/>
+                            <TextBlock Text="{Binding From}" FontSize="12"/>
+                            <TextBlock Text="{Binding Date}" FontSize="10"/>
+                        </StackPanel>
+                    </DataTemplate>
+                </ListBox.ItemTemplate>
+            </ListBox>
+
+            <Button Grid.Row="1"
+                    Margin="10,8,10,0"
+                    Content="Cargar mas"
+                    Command="{Binding LoadMoreCommand}"
+                    IsVisible="{Binding HasMoreEmails}" />
+        </Grid>
+
+        <ScrollViewer Grid.Row="1" Grid.Column="1" Margin="10">
+            <StackPanel>
+                <TextBlock Text="{Binding SelectedEmail.Subject}" FontWeight="Bold" FontSize="16"/>
+                <TextBlock Text="{Binding SelectedEmail.From}" FontSize="12"/>
+                <TextBlock Text="{Binding SelectedEmail.Date}" FontSize="10"/>
+                <Separator Margin="5"/>
+                <TextBlock Text="HTML convertido a vista legible"
+                           IsVisible="{Binding SelectedEmailUsesHtmlFallback}"
+                           FontStyle="Italic"
+                           Margin="0,0,0,8"/>
+                <TextBlock Text="{Binding SelectedEmailBody}" TextWrapping="Wrap"/>
+            </StackPanel>
+        </ScrollViewer>
+    </Grid>
+</Window>

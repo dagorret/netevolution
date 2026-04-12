@@ -1,33 +1,18 @@
-# Build artifacts
-bin/
-obj/
-
-# User and IDE files
-.idea/
-.vs/
-*.user
-*.suo
-*.userprefs
-
-# Rider / ReSharper
-_ReSharper*/
-*.DotSettings.user
-
-# Avalonia / desktop runtime artifacts
-*.pdb
 
 # Local environment and secrets
 .account
 .setenv.txt
 .env
 .env.*
-
-# Local data
-data/
-*.db
-*.db-shm
-*.db-wal
-
-# OS files
-.DS_Store
-Thumbs.db
+bin/
+obj/
+**/bin/
+**/obj/
+.vscode/
+.vs/
+.idea/
+*.user
+*.rsuser
+*.suo
+*.pdb
+TestResults/

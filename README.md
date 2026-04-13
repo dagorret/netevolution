@@ -8,7 +8,7 @@
 [![Status](https://img.shields.io/badge/Status-Active%20Prototype-F59E0B)](#current-phase)
 [![License](https://img.shields.io/badge/License-Private-lightgrey)](#)
 
-An experimental mail client built in C# with a layered architecture, local SQLite persistence, IMAP synchronization through MailKit, and two frontends: CLI and Desktop with Avalonia.
+A mail client prototype built in C# with a layered architecture, local SQLite persistence, IMAP synchronization through MailKit, secure password storage through the host OS keyring, and two frontends: CLI and Desktop with Avalonia.
 
 ## What It Is
 
@@ -16,9 +16,11 @@ Nevolution is a mail client designed around a simple and extensible architecture
 
 - synchronizes message headers from IMAP into SQLite
 - persists accounts and the active account locally
+- stores account passwords in the OS secure store instead of SQLite
 - downloads message bodies on demand and in the background
 - supports real IMAP folders (`INBOX`, `Sent`, `Drafts`, `Trash`, `Archive`)
 - exposes the same data source to both CLI and Desktop
+- lets users add accounts directly from the Desktop UI
 
 The current focus is reading experience, incremental sync, and UI consistency when the user switches accounts, folders, or emails quickly.
 
@@ -33,12 +35,14 @@ The solution is split into layers:
 - `Nevolution.Infrastructure`
   - IMAP implementation with `MailKit`
   - SQLite persistence with `Microsoft.Data.Sqlite`
+  - platform-specific secret stores (`libsecret`, Windows Credential Manager, macOS Keychain)
 - `Nevolution.App.Cli`
   - operational utilities for account setup, account selection, and manual sync
 - `Nevolution.App.Desktop`
   - Desktop UI with Avalonia
   - MVVM pattern
   - immediate local rendering plus background IMAP work
+  - account creation flow from the UI
 
 ## Technology Stack
 
@@ -46,12 +50,15 @@ The solution is split into layers:
 - `Avalonia 12` for cross-platform Desktop UI
 - `MailKit 4.15.1` for IMAP
 - `Microsoft.Data.Sqlite 10.0.5` for local persistence
+- `Ace4896.DBus.Services.Secrets 1.4.0` for Linux Secret Service integration
 - `MVVM` in Desktop
-- `SQLite` as the single source of truth for accounts, headers, folder state, and bodies
+- `SQLite` for accounts metadata, headers, folder state, and message bodies
+- native secret storage per OS for credentials
 
 ## Current Features
 
 - persisted IMAP accounts in SQLite
+- secure password persistence through `ISecretStore`
 - active account shared by CLI and Desktop
 - incremental header synchronization per folder
 - body download:
@@ -67,6 +74,10 @@ The solution is split into layers:
   - SQLite first
   - IMAP sync after
   - cancellation and obsolete request discard
+- Desktop account creation:
+  - main menu
+  - add account dialog
+  - validation and immediate activation
 
 ## Current Phase
 
@@ -75,7 +86,7 @@ Status: **functional prototype / active prototype**
 The project already covers the core reading and synchronization flow, but it is still under active construction. In particular:
 
 - it is optimized for reading, not yet for composition or SMTP sending
-- passwords are currently stored in SQLite behind a replaceable abstraction
+- passwords are resolved through a single abstraction and persisted in the OS keyring when available
 - console instrumentation and diagnostics are already in place
 - cancellation, concurrency, and UI responsiveness are actively being hardened
 
@@ -110,7 +121,16 @@ dotnet restore Nevolution.slnx
 
 ### 3. Create or register an account
 
-SQLite is the source of truth. The recommended way to create the first account is through the CLI:
+Accounts metadata is stored in SQLite. Passwords are stored through `ISecretStore`:
+
+- Linux: `LibSecretStore` via Secret Service / libsecret
+- Windows: Credential Manager
+- macOS: Keychain
+- fallback: `EnvironmentSecretStore` via `NEVOLUTION_PASSWORD`
+
+You can create an account either from the Desktop UI or through the CLI.
+
+CLI example:
 
 ```bash
 dotnet run --project src/Nevolution.App.Cli -- account add \
@@ -122,6 +142,13 @@ dotnet run --project src/Nevolution.App.Cli -- account add \
   --username your_mail@gmail.com \
   --active
 ```
+
+Desktop flow:
+
+1. Launch `Nevolution.App.Desktop`
+2. Open `Cuenta -> Añadir cuenta`
+3. Fill in display name, email, IMAP host, IMAP port, username, and password
+4. Save the account and optionally use it immediately
 
 List configured accounts:
 
@@ -161,6 +188,7 @@ The app:
 
 - opens the Desktop window
 - loads the active account from SQLite
+- loads the password from the configured secret store
 - resolves known IMAP folders
 - shows local data first
 - runs sync and body download in the background
@@ -191,8 +219,9 @@ Persisted accounts use this logical schema:
 - `ImapPort`
 - `Username`
 - `DisplayName`
-- `Password`
 - `IsActive`
+
+`Password` remains part of `MailAccount` only as the in-memory carrier. It is not persisted in SQLite in current versions.
 
 ### Emails
 
@@ -243,6 +272,8 @@ The project already includes console logs for:
 - header sync
 - body downloads
 - cancellation and obsolete requests
+- secret store resolution and fallback
+- account creation and activation
 
 This makes it easier to diagnose credential issues, host resolution, SSL/TLS problems, latency, and UI race conditions.
 
@@ -250,13 +281,14 @@ This makes it easier to diagnose credential issues, host resolution, SSL/TLS pro
 
 - no SMTP sending yet
 - no message composition editor
-- no secret storage yet
 - pagination and virtualization are still evolving
 - HTML rendering in Desktop currently uses a readable-text fallback, not a full HTML engine
+- Desktop account management currently covers add/use flow only; edit/delete/test-connection are still pending
 
 ## Short-Term Roadmap
 
-- secret storage for credentials
+- edit and delete accounts from Desktop
+- connection test / validation before save
 - improved pagination / cursor-based paging
 - SMTP composition and sending
 - better HTML rendering
@@ -275,5 +307,9 @@ dotnet build src/Nevolution.App.Desktop/Nevolution.App.Desktop.csproj
 ## Notes
 
 - CLI and Desktop share the same active account and the same SQLite database.
+- Existing databases with legacy plaintext passwords are migrated on load into the configured secret store when possible.
+- `NEVOLUTION_DATA_PATH` changes the data directory used by both apps.
+- `NEVOLUTION_SECRET_STORE` can override secret store selection with `auto`, `environment`, `linux`, `windows`, or `macos`.
+- `NEVOLUTION_PASSWORD` can be used as a fallback for CLI/testing environments without a keyring session.
 - If IMAP login fails, the app tries to produce explicit diagnostics without logging the password.
 - The project is optimized for fast iteration and intentionally keeps the design simple.

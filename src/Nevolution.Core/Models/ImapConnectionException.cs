@@ -1,3 +1,5 @@
+using Nevolution.Core.Resources;
+
 namespace Nevolution.Core.Models;
 
 public sealed class ImapConnectionException : InvalidOperationException
@@ -46,12 +48,12 @@ public sealed class ImapConnectionException : InvalidOperationException
     public string UserMessage =>
         FailureKind switch
         {
-            ImapFailureKind.Authentication => "No se pudo autenticar la cuenta activa. Revisa email/app password.",
-            ImapFailureKind.InvalidAccountConfiguration => "La cuenta activa esta incompleta. Revisa host, puerto, usuario y app password.",
-            ImapFailureKind.HostResolution => "No se pudo resolver el host IMAP configurado para la cuenta activa.",
-            ImapFailureKind.Security => "No se pudo establecer una conexion segura con el servidor IMAP.",
-            ImapFailureKind.Connection => "No se pudo conectar al servidor IMAP configurado para la cuenta activa.",
-            _ => "Fallo la conexion IMAP de la cuenta activa."
+            ImapFailureKind.Authentication => Strings.UserError_ImapAuthentication,
+            ImapFailureKind.InvalidAccountConfiguration => Strings.UserError_ImapInvalidAccountConfiguration,
+            ImapFailureKind.HostResolution => Strings.UserError_ImapHostResolution,
+            ImapFailureKind.Security => Strings.UserError_ImapSecurity,
+            ImapFailureKind.Connection => Strings.UserError_ImapConnection,
+            _ => Strings.UserError_ImapGeneric
         };
 
     public string ToDiagnosticString()

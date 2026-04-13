@@ -1,12 +1,15 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Windows.Input;
 using Avalonia.Threading;
 using Nevolution.Core;
 using Nevolution.Core.Abstractions;
+using Nevolution.Core.Localization;
 using Nevolution.Core.Models;
+using Nevolution.Core.Resources;
 
 namespace Nevolution.App.Desktop.ViewModels;
 
@@ -21,9 +24,12 @@ public sealed class MainViewModel : INotifyPropertyChanged
     private readonly Dictionary<string, MailAccount> _accountLookup = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, string> _displayBodyCache = new(StringComparer.Ordinal);
     private readonly List<EmailMessage> _allEmails = [];
+    private readonly string _dataDirectory;
+    private readonly Stopwatch _startupStopwatch = Stopwatch.StartNew();
     private EmailMessage? _selectedEmail;
     private MailAccount? _selectedAccount;
     private MailFolderInfo? _selectedFolder;
+    private LanguageOption? _selectedLanguage;
     private string _filterText = string.Empty;
     private bool _showUnreadOnly;
     private bool _selectedEmailUsesHtmlFallback;
@@ -31,26 +37,37 @@ public sealed class MainViewModel : INotifyPropertyChanged
     private bool _hasMoreEmails;
     private bool _selectedEmailIsLoadingBody;
     private string _accountStatusMessage = string.Empty;
+    private string _listStatusMessage = string.Empty;
     private string _lastAccountErrorSignature = string.Empty;
+    private Func<string>? _accountStatusFactory;
+    private Func<string>? _listStatusFactory;
     private CancellationTokenSource? _selectedEmailLoadCts;
     private CancellationTokenSource? _folderChangeCts;
     private CancellationTokenSource? _backgroundDownloadCts;
     private int _contextVersion;
+    private bool _hasCompletedInitialFolderLoad;
+    private bool _hasLoggedStartupEmailsVisible;
+    private bool _isInitialImapSyncInProgress;
+    private long _windowOpenedOnViewModelElapsedMs = -1;
 
     public MainViewModel(
         IEmailRepository repository,
         IMailClient folderMailClient,
         SyncService syncService,
-        BackgroundBodySyncService bodySyncService)
+        BackgroundBodySyncService bodySyncService,
+        string dataDirectory)
     {
         _repository = repository;
         _folderMailClient = folderMailClient;
         _syncService = syncService;
         _bodySyncService = bodySyncService;
+        _dataDirectory = dataDirectory;
         Console.WriteLine("Desktop startup: MainViewModel ctor");
         _bodySyncService.BodyDownloaded += OnBodyDownloaded;
         _bodySyncService.DownloadFailed += OnBackgroundDownloadFailed;
+        AppCulture.CultureChanged += OnCultureChanged;
         LoadMoreCommand = new AsyncCommand(LoadMoreAsync, () => HasMoreEmails && !IsLoadingMore && SelectedAccount is not null && SelectedFolder is not null);
+        RebuildLanguageOptions();
         Console.WriteLine("Desktop startup: MainViewModel ctor completed");
     }
 
@@ -62,7 +79,25 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
     public ObservableCollection<EmailMessage> Emails { get; } = [];
 
+    public ObservableCollection<LanguageOption> AvailableLanguages { get; } = [];
+
     public ICommand LoadMoreCommand { get; }
+
+    public LanguageOption? SelectedLanguage
+    {
+        get => _selectedLanguage;
+        set
+        {
+            if (value is null || ReferenceEquals(_selectedLanguage, value))
+            {
+                return;
+            }
+
+            _selectedLanguage = value;
+            OnPropertyChanged();
+            ApplySelectedLanguage(value);
+        }
+    }
 
     public MailAccount? SelectedAccount
     {
@@ -182,7 +217,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
                 return displayBody;
             }
 
-            return SelectedEmailIsLoadingBody ? "Cargando..." : string.Empty;
+            return SelectedEmailIsLoadingBody ? Strings.MailBody_Loading : string.Empty;
         }
     }
 
@@ -267,29 +302,57 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
     public bool HasAccountStatusMessage => !string.IsNullOrWhiteSpace(AccountStatusMessage);
 
+    public string ListStatusMessage
+    {
+        get => _listStatusMessage;
+        private set
+        {
+            if (string.Equals(_listStatusMessage, value, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            _listStatusMessage = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(HasListStatusMessage));
+        }
+    }
+
+    public bool HasListStatusMessage => !string.IsNullOrWhiteSpace(ListStatusMessage);
+
+    public void NotifyWindowOpened(long elapsedMs)
+    {
+        _windowOpenedOnViewModelElapsedMs = _startupStopwatch.ElapsedMilliseconds;
+        Console.WriteLine($"Desktop startup: window visible elapsedMs={elapsedMs}, viewModelElapsedMs={_windowOpenedOnViewModelElapsedMs}");
+    }
+
     public async Task InitializeAsync()
     {
+        var startupStopwatch = Stopwatch.StartNew();
         Console.WriteLine("Desktop startup: MainViewModel.InitializeAsync started");
 
         try
         {
             await LoadAccountsAsync();
+            Console.WriteLine($"Desktop startup: accounts loaded elapsedMs={startupStopwatch.ElapsedMilliseconds}, count={Accounts.Count}");
 
             var activeAccount = Accounts.FirstOrDefault(account => account.IsActive) ?? Accounts.FirstOrDefault();
+            Console.WriteLine($"Desktop startup: active account resolved accountId={activeAccount?.Id ?? "-"}");
             SelectedAccount = activeAccount;
 
             if (activeAccount is null)
             {
                 await ResetFolderAndEmailsAsync();
-                SetAccountStatus("No hay una cuenta activa configurada.");
+                SetAccountStatusResource(nameof(Strings.Status_NoActiveAccount));
+                SetListStatusResource(nameof(Strings.Status_NoLocalEmailsYet));
             }
 
-            Console.WriteLine("Desktop startup: MainViewModel.InitializeAsync completed");
+            Console.WriteLine($"Desktop startup: MainViewModel.InitializeAsync completed elapsedMs={startupStopwatch.ElapsedMilliseconds}");
         }
         catch (Exception exception)
         {
             Console.WriteLine($"Desktop startup: MainViewModel.InitializeAsync failed: {exception}");
-            SetAccountStatus("Fallo la carga inicial. Revisa la cuenta activa o la configuracion.");
+            SetAccountStatusResource(nameof(Strings.Status_InitialLoadFailed));
             throw;
         }
     }
@@ -335,7 +398,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
         if (account is null)
         {
             await ResetFolderAndEmailsAsync();
-            SetAccountStatus("No hay una cuenta activa configurada.");
+            SetAccountStatusResource(nameof(Strings.Status_NoActiveAccount));
             return;
         }
 
@@ -345,7 +408,8 @@ public sealed class MainViewModel : INotifyPropertyChanged
         {
             await _repository.SetActiveAccountAsync(account.Id);
             SetActiveAccountLocally(account.Id);
-            await LoadFoldersAsync(account, version);
+            LoadFoldersLocally(account, version);
+            _ = RefreshFoldersFromServerAsync(account, version);
         }
         catch (ImapConnectionException exception)
         {
@@ -355,25 +419,43 @@ public sealed class MainViewModel : INotifyPropertyChanged
         catch (Exception exception)
         {
             Console.WriteLine($"SelectedAccount error for {account.Id}: {exception}");
-            SetAccountStatus("No se pudo cargar la cuenta activa.");
+            SetAccountStatusResource(nameof(Strings.Status_CannotLoadActiveAccount));
             await ResetFolderAndEmailsAsync();
         }
     }
 
-    private async Task LoadFoldersAsync(MailAccount account, int version)
+    private void LoadFoldersLocally(MailAccount account, int version)
     {
-        IReadOnlyList<MailFolderInfo> folders;
+        Console.WriteLine($"Desktop startup: applying local folders accountId={account.Id}, source=defaults");
+        ApplyFolders(MailFolderCatalog.Defaults, version, source: "local-defaults");
+    }
+
+    private async Task RefreshFoldersFromServerAsync(MailAccount account, int version)
+    {
+        var stopwatch = Stopwatch.StartNew();
 
         try
         {
-            folders = await _folderMailClient.GetKnownFoldersAsync(account);
+            var folders = await _folderMailClient.GetKnownFoldersAsync(account);
+            ApplyFolders(folders, version, source: "imap");
+            Console.WriteLine($"Folder list IMAP refresh completed: accountId={account.Id}, elapsedMs={stopwatch.ElapsedMilliseconds}, count={folders.Count}");
+        }
+        catch (OperationCanceledException)
+        {
+            Console.WriteLine($"Folder list IMAP refresh cancelled: accountId={account.Id}");
+        }
+        catch (ImapConnectionException exception)
+        {
+            Console.WriteLine($"Folder list IMAP refresh failed: accountId={account.Id}, failure={exception.FailureKind}");
         }
         catch (Exception exception)
         {
             Console.WriteLine($"LoadFolders error for {account.Id}: {exception}");
-            folders = MailFolderCatalog.Defaults;
         }
+    }
 
+    private void ApplyFolders(IReadOnlyList<MailFolderInfo> folders, int version, string source)
+    {
         if (version != Volatile.Read(ref _contextVersion))
         {
             return;
@@ -392,12 +474,30 @@ public sealed class MainViewModel : INotifyPropertyChanged
             ?? Folders.FirstOrDefault(folder => folder.Kind == MailFolderKind.Inbox)
             ?? Folders.FirstOrDefault();
 
+        Console.WriteLine($"Desktop startup: initial folder resolved accountId={SelectedAccount?.Id ?? "-"}, folder={selectedFolder?.ImapFolderName ?? "-"}, source={source}");
+
+        if (selectedFolder is null)
+        {
+            SelectedFolder = null;
+            return;
+        }
+
+        if (_selectedFolder is not null
+            && _selectedFolder.Kind == selectedFolder.Kind
+            && string.Equals(_selectedFolder.ImapFolderName, selectedFolder.ImapFolderName, StringComparison.OrdinalIgnoreCase))
+        {
+            _selectedFolder = selectedFolder;
+            OnPropertyChanged(nameof(SelectedFolder));
+            return;
+        }
+
         SelectedFolder = selectedFolder;
     }
 
     private async Task HandleSelectedFolderChangedAsync(MailFolderInfo? folder)
     {
         var totalStopwatch = Stopwatch.StartNew();
+        var isInitialFolderLoad = !_hasCompletedInitialFolderLoad;
         var version = Interlocked.Increment(ref _contextVersion);
         CancelFolderChangeOperations();
         CancelBackgroundDownload();
@@ -412,6 +512,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
         var cancellationToken = _folderChangeCts.Token;
 
         ClearAccountStatus();
+        ClearListStatus();
         var preferredSelectedEmailId = SelectedEmail?.Id;
 
         var sqliteStopwatch = Stopwatch.StartNew();
@@ -421,13 +522,17 @@ public sealed class MainViewModel : INotifyPropertyChanged
             preferredSelectedEmailId: preferredSelectedEmailId,
             cancellationToken: cancellationToken);
         Console.WriteLine(
-            $"Folder change SQLite load: accountId={SelectedAccount.Id}, folder={folder.ImapFolderName}, elapsedMs={sqliteStopwatch.ElapsedMilliseconds}, totalUiElapsedMs={totalStopwatch.ElapsedMilliseconds}");
+            $"Folder change SQLite load: accountId={SelectedAccount.Id}, folder={folder.ImapFolderName}, elapsedMs={sqliteStopwatch.ElapsedMilliseconds}, totalUiElapsedMs={totalStopwatch.ElapsedMilliseconds}, initial={isInitialFolderLoad}, visibleEmails={Emails.Count}");
 
         if (cancellationToken.IsCancellationRequested || version != Volatile.Read(ref _contextVersion))
         {
             Console.WriteLine($"Folder change discarded after SQLite load: accountId={SelectedAccount.Id}, folder={folder.ImapFolderName}, reason=obsolete");
             return;
         }
+
+        _hasCompletedInitialFolderLoad = true;
+        UpdateListStatusAfterEmailChange(isSyncInProgress: true);
+        LogStartupEmailsVisibleIfNeeded(source: "sqlite-initial");
 
         StartBackgroundDownload(SelectedAccount, folder);
         _ = SyncFolderInBackgroundAsync(SelectedAccount, folder, version, preferredSelectedEmailId, totalStopwatch, cancellationToken);
@@ -447,14 +552,6 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
         var selectedEmailIdToRestore = preferredSelectedEmailId ?? SelectedEmail?.Id;
 
-        if (reset)
-        {
-            _allEmails.Clear();
-            Emails.Clear();
-            SelectedEmail = null;
-            HasMoreEmails = false;
-        }
-
         if (IsLoadingMore)
         {
             return;
@@ -465,7 +562,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var loadedCount = _allEmails.Count;
+            var loadedCount = reset ? 0 : _allEmails.Count;
             var emails = await _repository.GetEmailsAsync(
                 SelectedAccount.Id,
                 SelectedFolder.ImapFolderName,
@@ -486,6 +583,14 @@ public sealed class MainViewModel : INotifyPropertyChanged
                 return;
             }
 
+            if (reset)
+            {
+                _allEmails.Clear();
+                Emails.Clear();
+                SelectedEmail = null;
+                HasMoreEmails = false;
+            }
+
             foreach (var email in emails)
             {
                 _allEmails.Add(email);
@@ -493,6 +598,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
             HasMoreEmails = emails.Count == PageSize;
             ApplyFilter();
+            UpdateListStatusAfterEmailChange(isSyncInProgress: _isInitialImapSyncInProgress);
 
             if (reset)
             {
@@ -516,6 +622,9 @@ public sealed class MainViewModel : INotifyPropertyChanged
         CancellationToken cancellationToken)
     {
         var syncStopwatch = Stopwatch.StartNew();
+        _isInitialImapSyncInProgress = true;
+        UpdateListStatusAfterEmailChange(isSyncInProgress: true);
+        Console.WriteLine($"Desktop startup: initial IMAP sync queued accountId={account.Id}, folder={folder.ImapFolderName}, elapsedSinceStartMs={_startupStopwatch.ElapsedMilliseconds}");
 
         try
         {
@@ -537,8 +646,13 @@ public sealed class MainViewModel : INotifyPropertyChanged
         catch (Exception exception)
         {
             Console.WriteLine($"SelectedFolder sync error for {folder.ImapFolderName}: {exception}");
-            SetAccountStatus("No se pudo sincronizar la carpeta activa.");
+            SetAccountStatusResource(nameof(Strings.Status_CannotSyncActiveFolder));
             return;
+        }
+        finally
+        {
+            _isInitialImapSyncInProgress = false;
+            UpdateListStatusAfterEmailChange(isSyncInProgress: false);
         }
 
         if (cancellationToken.IsCancellationRequested || version != Volatile.Read(ref _contextVersion))
@@ -553,6 +667,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
             contextVersion: version,
             preferredSelectedEmailId: preferredSelectedEmailId,
             cancellationToken: cancellationToken);
+        LogStartupEmailsVisibleIfNeeded(source: "imap-refresh");
         Console.WriteLine(
             $"Folder change refresh after sync: accountId={account.Id}, folder={folder.ImapFolderName}, elapsedMs={refreshStopwatch.ElapsedMilliseconds}, totalElapsedMs={totalStopwatch.ElapsedMilliseconds}");
 
@@ -563,6 +678,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
         }
 
         StartBackgroundDownload(account, folder);
+        UpdateListStatusAfterEmailChange(isSyncInProgress: false);
     }
 
     private async Task LoadMoreAsync()
@@ -755,7 +871,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
         catch (Exception exception)
         {
             Console.WriteLine($"LoadBodyAsync IMAP error for email {email.Id}: {exception}");
-            SetAccountStatus("No se pudo descargar el cuerpo del mail seleccionado.");
+            SetAccountStatusResource(nameof(Strings.Status_CannotDownloadSelectedMailBody));
         }
         finally
         {
@@ -785,7 +901,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
         catch (Exception exception)
         {
             Console.WriteLine($"Background body download error for {account.Id}/{folder.ImapFolderName}: {exception}");
-            SetAccountStatus("La descarga en segundo plano se detuvo por un error de la cuenta activa.");
+            SetAccountStatusResource(nameof(Strings.Status_BackgroundDownloadStopped));
         }
     }
 
@@ -804,6 +920,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
         Emails.Clear();
         SelectedEmail = null;
         HasMoreEmails = false;
+        ClearListStatus();
         return Task.CompletedTask;
     }
 
@@ -988,12 +1105,25 @@ public sealed class MainViewModel : INotifyPropertyChanged
             _lastAccountErrorSignature = signature;
         }
 
-        SetAccountStatus(exception.UserMessage);
+        SetAccountStatus(() => exception.UserMessage);
     }
 
     private void SetAccountStatus(string message)
     {
-        AccountStatusMessage = message;
+        _accountStatusFactory = () => message;
+        RefreshAccountStatusMessage();
+    }
+
+    private void SetAccountStatus(Func<string> messageFactory)
+    {
+        _accountStatusFactory = messageFactory;
+        RefreshAccountStatusMessage();
+    }
+
+    private void SetAccountStatusResource(string resourceKey)
+    {
+        _accountStatusFactory = () => Strings.ResourceManager.GetString(resourceKey, Strings.Culture) ?? resourceKey;
+        RefreshAccountStatusMessage();
     }
 
     public void SetStartupError(string message)
@@ -1004,7 +1134,165 @@ public sealed class MainViewModel : INotifyPropertyChanged
     private void ClearAccountStatus()
     {
         _lastAccountErrorSignature = string.Empty;
+        _accountStatusFactory = null;
         AccountStatusMessage = string.Empty;
+    }
+
+    private void RefreshAccountStatusMessage()
+    {
+        AccountStatusMessage = _accountStatusFactory?.Invoke() ?? string.Empty;
+    }
+
+    private void ApplySelectedLanguage(LanguageOption option)
+    {
+        var normalizedCulture = AppCulturePreferences.NormalizeCulture(option.Culture.Name);
+        AppCulturePreferences.SavePreferredCulture(_dataDirectory, normalizedCulture);
+
+        if (string.Equals(AppCulture.Current.Name, normalizedCulture.Name, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        AppCulture.SetCulture(normalizedCulture);
+    }
+
+    private void OnCultureChanged(object? sender, CultureInfo culture)
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            RebuildLanguageOptions(culture.Name);
+            RefreshFolderDisplayNames();
+            RefreshAccountStatusMessage();
+            RefreshListStatusMessage();
+            OnPropertyChanged(nameof(SelectedEmailBody));
+        });
+    }
+
+    private void RebuildLanguageOptions(string? selectedCultureName = null)
+    {
+        var resolvedCultureName = selectedCultureName ?? _selectedLanguage?.Culture.Name ?? AppCulture.Current.Name;
+        var options = AppCulturePreferences.SupportedCultures
+            .Select(culture => new LanguageOption
+            {
+                Culture = culture,
+                DisplayName = GetLanguageDisplayName(culture.Name)
+            })
+            .ToList();
+
+        AvailableLanguages.Clear();
+
+        foreach (var option in options)
+        {
+            AvailableLanguages.Add(option);
+        }
+
+        var nextSelected = AvailableLanguages.FirstOrDefault(option =>
+            string.Equals(option.Culture.Name, resolvedCultureName, StringComparison.OrdinalIgnoreCase))
+            ?? AvailableLanguages.FirstOrDefault();
+
+        if (!ReferenceEquals(_selectedLanguage, nextSelected))
+        {
+            _selectedLanguage = nextSelected;
+            OnPropertyChanged(nameof(SelectedLanguage));
+        }
+    }
+
+    private static string GetLanguageDisplayName(string cultureName)
+    {
+        return cultureName switch
+        {
+            "en" => Strings.Language_English,
+            _ => Strings.Language_Spanish
+        };
+    }
+
+    private void RefreshFolderDisplayNames()
+    {
+        if (Folders.Count == 0)
+        {
+            return;
+        }
+
+        var selectedKind = SelectedFolder?.Kind;
+        var refreshedFolders = Folders
+            .Select(folder => new MailFolderInfo
+            {
+                Kind = folder.Kind,
+                DisplayName = GetFolderDisplayName(folder.Kind),
+                ImapFolderName = folder.ImapFolderName
+            })
+            .ToList();
+
+        Folders.Clear();
+
+        foreach (var folder in refreshedFolders)
+        {
+            Folders.Add(folder);
+        }
+
+        var nextSelectedFolder = selectedKind is null
+            ? Folders.FirstOrDefault()
+            : Folders.FirstOrDefault(folder => folder.Kind == selectedKind);
+
+        if (!ReferenceEquals(_selectedFolder, nextSelectedFolder))
+        {
+            _selectedFolder = nextSelectedFolder;
+            OnPropertyChanged(nameof(SelectedFolder));
+        }
+    }
+
+    private static string GetFolderDisplayName(MailFolderKind kind)
+    {
+        return kind switch
+        {
+            MailFolderKind.Sent => Strings.Folder_Sent,
+            MailFolderKind.Drafts => Strings.Folder_Drafts,
+            MailFolderKind.Trash => Strings.Folder_Trash,
+            MailFolderKind.Archive => Strings.Folder_Archive,
+            _ => Strings.Folder_Inbox
+        };
+    }
+
+    private void SetListStatusResource(string resourceKey)
+    {
+        _listStatusFactory = () => Strings.ResourceManager.GetString(resourceKey, Strings.Culture) ?? resourceKey;
+        RefreshListStatusMessage();
+    }
+
+    private void ClearListStatus()
+    {
+        _listStatusFactory = null;
+        ListStatusMessage = string.Empty;
+    }
+
+    private void RefreshListStatusMessage()
+    {
+        ListStatusMessage = _listStatusFactory?.Invoke() ?? string.Empty;
+    }
+
+    private void UpdateListStatusAfterEmailChange(bool isSyncInProgress)
+    {
+        if (Emails.Count > 0)
+        {
+            ClearListStatus();
+            return;
+        }
+
+        SetListStatusResource(isSyncInProgress
+            ? nameof(Strings.Status_SyncingFolder)
+            : nameof(Strings.Status_NoLocalEmailsYet));
+    }
+
+    private void LogStartupEmailsVisibleIfNeeded(string source)
+    {
+        if (_hasLoggedStartupEmailsVisible || Emails.Count == 0)
+        {
+            return;
+        }
+
+        _hasLoggedStartupEmailsVisible = true;
+        Console.WriteLine(
+            $"Desktop startup: emails visible source={source}, count={Emails.Count}, elapsedSinceViewModelMs={_startupStopwatch.ElapsedMilliseconds}, elapsedSinceWindowMs={(_windowOpenedOnViewModelElapsedMs >= 0 ? _startupStopwatch.ElapsedMilliseconds - _windowOpenedOnViewModelElapsedMs : -1)}");
     }
 
     private void OnPropertyChanged([CallerMemberName] string? propertyName = null)

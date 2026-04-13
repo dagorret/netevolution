@@ -1,14 +1,16 @@
+using Nevolution.Core.Resources;
+
 namespace Nevolution.Core.Models;
 
 public static class MailFolderCatalog
 {
     public static IReadOnlyList<MailFolderInfo> Defaults { get; } =
     [
-        new MailFolderInfo { Kind = MailFolderKind.Inbox, DisplayName = "Inbox", ImapFolderName = "INBOX" },
-        new MailFolderInfo { Kind = MailFolderKind.Sent, DisplayName = "Sent", ImapFolderName = "Sent" },
-        new MailFolderInfo { Kind = MailFolderKind.Drafts, DisplayName = "Drafts", ImapFolderName = "Drafts" },
-        new MailFolderInfo { Kind = MailFolderKind.Trash, DisplayName = "Trash", ImapFolderName = "Trash" },
-        new MailFolderInfo { Kind = MailFolderKind.Archive, DisplayName = "Archive", ImapFolderName = "Archive" }
+        new MailFolderInfo { Kind = MailFolderKind.Inbox, DisplayName = Strings.Folder_Inbox, ImapFolderName = "INBOX" },
+        new MailFolderInfo { Kind = MailFolderKind.Sent, DisplayName = Strings.Folder_Sent, ImapFolderName = "Sent" },
+        new MailFolderInfo { Kind = MailFolderKind.Drafts, DisplayName = Strings.Folder_Drafts, ImapFolderName = "Drafts" },
+        new MailFolderInfo { Kind = MailFolderKind.Trash, DisplayName = Strings.Folder_Trash, ImapFolderName = "Trash" },
+        new MailFolderInfo { Kind = MailFolderKind.Archive, DisplayName = Strings.Folder_Archive, ImapFolderName = "Archive" }
     ];
 
     public static MailFolderKind ParseKind(string? value)

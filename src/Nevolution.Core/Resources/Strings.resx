@@ -1,0 +1,159 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <resheader name="resmimetype">
+    <value>text/microsoft-resx</value>
+  </resheader>
+  <resheader name="version">
+    <value>2.0</value>
+  </resheader>
+  <resheader name="reader">
+    <value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <resheader name="writer">
+    <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <data name="Folder_Archive" xml:space="preserve">
+    <value>Archivo</value>
+  </data>
+  <data name="Folder_Drafts" xml:space="preserve">
+    <value>Borradores</value>
+  </data>
+  <data name="Folder_Inbox" xml:space="preserve">
+    <value>Recibidos</value>
+  </data>
+  <data name="Folder_Sent" xml:space="preserve">
+    <value>Enviados</value>
+  </data>
+  <data name="Folder_Trash" xml:space="preserve">
+    <value>Papelera</value>
+  </data>
+  <data name="Cli_AccountNotFound" xml:space="preserve">
+    <value>No existe la cuenta '{0}'.</value>
+  </data>
+  <data name="Cli_AccountSaved" xml:space="preserve">
+    <value>Cuenta guardada: {0}</value>
+  </data>
+  <data name="Cli_ActiveAccount" xml:space="preserve">
+    <value>Cuenta activa: {0}</value>
+  </data>
+  <data name="Cli_AuthenticationFailed" xml:space="preserve">
+    <value>Fallo la autenticacion IMAP. Verifica el email completo y el password.</value>
+  </data>
+  <data name="Cli_ConnectionFailed" xml:space="preserve">
+    <value>No se pudo establecer la conexion ({0})</value>
+  </data>
+  <data name="Cli_DetailPrefix" xml:space="preserve">
+    <value>DETAIL:</value>
+  </data>
+  <data name="Cli_ErrorPrefix" xml:space="preserve">
+    <value>ERROR:</value>
+  </data>
+  <data name="Cli_HostResolutionFailed" xml:space="preserve">
+    <value>No se pudo resolver el host</value>
+  </data>
+  <data name="Cli_NoAccountsConfigured" xml:space="preserve">
+    <value>No hay cuentas configuradas.</value>
+  </data>
+  <data name="Cli_NoActiveAccount" xml:space="preserve">
+    <value>No hay una cuenta activa en SQLite. Usa `account add` y luego `account use`.</value>
+  </data>
+  <data name="Cli_RequiredArgumentMissing" xml:space="preserve">
+    <value>Falta el argumento requerido {0}.</value>
+  </data>
+  <data name="Cli_ResolvingHost" xml:space="preserve">
+    <value>Resolviendo host IMAP {0}...</value>
+  </data>
+  <data name="Cli_SyncedEmailsCount" xml:space="preserve">
+    <value>Correos sincronizados: {0}</value>
+  </data>
+  <data name="Cli_SyncingFolder" xml:space="preserve">
+    <value>Sincronizando carpeta {0} para {1}...</value>
+  </data>
+  <data name="Cli_UnknownAccountCommand" xml:space="preserve">
+    <value>Comando de cuenta no reconocido: {0}</value>
+  </data>
+  <data name="Cli_UsageAccountAdd" xml:space="preserve">
+    <value>  account add --email &lt;mail&gt; --password &lt;password&gt; [--display-name &lt;name&gt;] [--imap-host &lt;host&gt;] [--imap-port &lt;port&gt;] [--username &lt;user&gt;] [--active]</value>
+  </data>
+  <data name="Cli_UsageAccountList" xml:space="preserve">
+    <value>  account list</value>
+  </data>
+  <data name="Cli_UsageAccountUse" xml:space="preserve">
+    <value>  account use --id &lt;account-id&gt;</value>
+  </data>
+  <data name="Cli_UsageHeader" xml:space="preserve">
+    <value>Uso:</value>
+  </data>
+  <data name="Language_English" xml:space="preserve">
+    <value>Ingles</value>
+  </data>
+  <data name="Language_Spanish" xml:space="preserve">
+    <value>Espanol</value>
+  </data>
+  <data name="MailBody_Loading" xml:space="preserve">
+    <value>Cargando...</value>
+  </data>
+  <data name="MainWindow_FilterPlaceholder" xml:space="preserve">
+    <value>Filtrar por asunto</value>
+  </data>
+  <data name="MainWindow_HtmlFallbackNotice" xml:space="preserve">
+    <value>HTML convertido a vista legible</value>
+  </data>
+  <data name="MainWindow_LanguageLabel" xml:space="preserve">
+    <value>Idioma</value>
+  </data>
+  <data name="MainWindow_LoadMore" xml:space="preserve">
+    <value>Cargar mas</value>
+  </data>
+  <data name="MainWindow_ShowUnreadOnly" xml:space="preserve">
+    <value>No leidos</value>
+  </data>
+  <data name="MainWindow_Title" xml:space="preserve">
+    <value>Nevolution</value>
+  </data>
+  <data name="Status_BackgroundDownloadStopped" xml:space="preserve">
+    <value>La descarga en segundo plano se detuvo por un error de la cuenta activa.</value>
+  </data>
+  <data name="Status_CannotDownloadSelectedMailBody" xml:space="preserve">
+    <value>No se pudo descargar el cuerpo del mail seleccionado.</value>
+  </data>
+  <data name="Status_CannotLoadActiveAccount" xml:space="preserve">
+    <value>No se pudo cargar la cuenta activa.</value>
+  </data>
+  <data name="Status_CannotSyncActiveFolder" xml:space="preserve">
+    <value>No se pudo sincronizar la carpeta activa.</value>
+  </data>
+  <data name="Status_InitialLoadFailed" xml:space="preserve">
+    <value>Fallo la carga inicial. Revisa la cuenta activa o la configuracion.</value>
+  </data>
+  <data name="Status_InitialLoadFailedImap" xml:space="preserve">
+    <value>Fallo la carga inicial. Revisa la cuenta activa o la configuracion IMAP.</value>
+  </data>
+  <data name="Status_NoLocalEmailsYet" xml:space="preserve">
+    <value>No hay correos locales todavia.</value>
+  </data>
+  <data name="Status_NoActiveAccount" xml:space="preserve">
+    <value>No hay una cuenta activa configurada.</value>
+  </data>
+  <data name="Status_SyncingFolder" xml:space="preserve">
+    <value>Sincronizando...</value>
+  </data>
+  <data name="UserError_ImapAuthentication" xml:space="preserve">
+    <value>No se pudo autenticar la cuenta activa. Revisa email/app password.</value>
+  </data>
+  <data name="UserError_ImapConnection" xml:space="preserve">
+    <value>No se pudo conectar al servidor IMAP configurado para la cuenta activa.</value>
+  </data>
+  <data name="UserError_ImapGeneric" xml:space="preserve">
+    <value>Fallo la conexion IMAP de la cuenta activa.</value>
+  </data>
+  <data name="UserError_ImapHostResolution" xml:space="preserve">
+    <value>No se pudo resolver el host IMAP configurado para la cuenta activa.</value>
+  </data>
+  <data name="UserError_ImapInvalidAccountConfiguration" xml:space="preserve">
+    <value>La cuenta activa esta incompleta. Revisa host, puerto, usuario y app password.</value>
+  </data>
+  <data name="UserError_ImapSecurity" xml:space="preserve">
+    <value>No se pudo establecer una conexion segura con el servidor IMAP.</value>
+  </data>
+</root>

@@ -3,8 +3,12 @@ using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
 using Nevolution.App.Desktop.ViewModels;
 using Nevolution.Core;
+using Nevolution.Core.Localization;
+using Nevolution.Core.Resources;
 using Nevolution.Infrastructure.Mail;
 using Nevolution.Infrastructure.Persistence;
+using System.Diagnostics;
+using System.Globalization;
 
 namespace Nevolution.App.Desktop;
 
@@ -20,6 +24,7 @@ public partial class App : Application
     public override void OnFrameworkInitializationCompleted()
     {
         Console.WriteLine("Desktop startup: OnFrameworkInitializationCompleted");
+        var startupStopwatch = Stopwatch.StartNew();
 
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
@@ -28,6 +33,7 @@ public partial class App : Application
                 Console.WriteLine("Desktop startup: creating services");
                 var dataDir = ResolveDataDirectory();
                 Directory.CreateDirectory(dataDir);
+                AppCulture.SetCulture(AppCulturePreferences.LoadPreferredCulture(dataDir));
 
                 var dbPath = Path.Combine(dataDir, "mail.db");
                 var repository = new SqliteEmailRepository(dbPath);
@@ -36,7 +42,7 @@ public partial class App : Application
                 var bodyMailClient = new MailKitClient();
                 var syncService = new SyncService(syncMailClient, repository);
                 var bodySyncService = new BackgroundBodySyncService(bodyMailClient, repository);
-                var mainViewModel = new MainViewModel(repository, folderMailClient, syncService, bodySyncService);
+                var mainViewModel = new MainViewModel(repository, folderMailClient, syncService, bodySyncService, dataDir);
 
                 Console.WriteLine("Desktop startup: creating MainWindow");
                 var window = new MainWindow
@@ -44,20 +50,12 @@ public partial class App : Application
                     DataContext = mainViewModel
                 };
 
-                window.Opened += async (_, _) =>
+                window.Opened += (_, _) =>
                 {
-                    Console.WriteLine("Desktop startup: MainWindow opened, starting initial load");
-
-                    try
-                    {
-                        await mainViewModel.InitializeAsync();
-                        Console.WriteLine("Desktop startup: initial load completed");
-                    }
-                    catch (Exception exception)
-                    {
-                        Console.WriteLine($"Desktop startup: initial load failed: {exception}");
-                        mainViewModel.SetStartupError("Fallo la carga inicial. Revisa la cuenta activa o la configuracion IMAP.");
-                    }
+                    var windowOpenedElapsedMs = startupStopwatch.ElapsedMilliseconds;
+                    Console.WriteLine($"Desktop startup: MainWindow opened elapsedMs={windowOpenedElapsedMs}");
+                    mainViewModel.NotifyWindowOpened(windowOpenedElapsedMs);
+                    _ = RunInitialLoadAsync(mainViewModel);
                 };
 
                 desktop.MainWindow = window;
@@ -72,6 +70,22 @@ public partial class App : Application
 
         base.OnFrameworkInitializationCompleted();
         Console.WriteLine("Desktop startup: OnFrameworkInitializationCompleted completed");
+    }
+
+    private static async Task RunInitialLoadAsync(MainViewModel mainViewModel)
+    {
+        Console.WriteLine("Desktop startup: initial load queued");
+
+        try
+        {
+            await mainViewModel.InitializeAsync();
+            Console.WriteLine("Desktop startup: initial load completed");
+        }
+        catch (Exception exception)
+        {
+            Console.WriteLine($"Desktop startup: initial load failed: {exception}");
+            mainViewModel.SetStartupError(Strings.Status_InitialLoadFailedImap);
+        }
     }
 
     private static string ResolveDataDirectory()

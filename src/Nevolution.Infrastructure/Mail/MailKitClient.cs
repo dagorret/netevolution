@@ -5,6 +5,7 @@ using MailKit.Security;
 using MimeKit;
 using Nevolution.Core.Abstractions;
 using Nevolution.Core.Models;
+using Nevolution.Core.Resources;
 using System.Net.Sockets;
 
 namespace Nevolution.Infrastructure.Mail;
@@ -13,11 +14,11 @@ public sealed class MailKitClient : IMailClient
 {
     private static readonly (MailFolderKind Kind, SpecialFolder? SpecialFolder, string DisplayName, string[] FallbackNames)[] KnownFolders =
     [
-        (MailFolderKind.Inbox, null, "Inbox", ["INBOX"]),
-        (MailFolderKind.Sent, SpecialFolder.Sent, "Sent", ["Sent", "Sent Items", "Sent Mail", "Enviados"]),
-        (MailFolderKind.Drafts, SpecialFolder.Drafts, "Drafts", ["Drafts", "Borradores"]),
-        (MailFolderKind.Trash, SpecialFolder.Trash, "Trash", ["Trash", "Deleted Items", "Bin", "Papelera"]),
-        (MailFolderKind.Archive, SpecialFolder.Archive, "Archive", ["Archive", "All Mail", "Archivados"])
+        (MailFolderKind.Inbox, null, Strings.Folder_Inbox, ["INBOX"]),
+        (MailFolderKind.Sent, SpecialFolder.Sent, Strings.Folder_Sent, ["Sent", "Sent Items", "Sent Mail", "Enviados"]),
+        (MailFolderKind.Drafts, SpecialFolder.Drafts, Strings.Folder_Drafts, ["Drafts", "Borradores"]),
+        (MailFolderKind.Trash, SpecialFolder.Trash, Strings.Folder_Trash, ["Trash", "Deleted Items", "Bin", "Papelera"]),
+        (MailFolderKind.Archive, SpecialFolder.Archive, Strings.Folder_Archive, ["Archive", "All Mail", "Archivados"])
     ];
 
     private readonly ImapClient _imapClient = new();
@@ -48,7 +49,7 @@ public sealed class MailKitClient : IMailClient
         {
             throw CreateException(
                 ImapFailureKind.HostResolution,
-                $"No se pudo resolver el host IMAP '{account.ImapHost}'.",
+                $"IMAP host resolution failed for '{account.ImapHost}'.",
                 account,
                 username,
                 innerException: exception);
@@ -57,7 +58,7 @@ public sealed class MailKitClient : IMailClient
         {
             throw CreateException(
                 ImapFailureKind.Authentication,
-                $"Autenticación IMAP fallida para el usuario '{username}'. Verifica el email completo y el app password.",
+                $"IMAP authentication failed for '{username}'.",
                 account,
                 username,
                 innerException: exception);
@@ -66,7 +67,7 @@ public sealed class MailKitClient : IMailClient
         {
             throw CreateException(
                 ImapFailureKind.Security,
-                $"No se pudo establecer una conexión segura con el servidor IMAP '{account.ImapHost}:{account.ImapPort}'.",
+                $"Secure IMAP connection failed for '{account.ImapHost}:{account.ImapPort}'.",
                 account,
                 username,
                 innerException: exception);
@@ -75,7 +76,7 @@ public sealed class MailKitClient : IMailClient
         {
             throw CreateException(
                 ImapFailureKind.Authentication,
-                $"Autenticación IMAP fallida para el usuario '{username}'. Verifica el email completo y el app password.",
+                $"IMAP authentication failed for '{username}'.",
                 account,
                 username,
                 innerException: exception);
@@ -84,7 +85,7 @@ public sealed class MailKitClient : IMailClient
         {
             throw CreateException(
                 ImapFailureKind.Connection,
-                $"No se pudo conectar al servidor IMAP '{account.ImapHost}:{account.ImapPort}' con el usuario '{username}'.",
+                $"IMAP connection failed for '{username}' at '{account.ImapHost}:{account.ImapPort}'.",
                 account,
                 username,
                 innerException: exception);
@@ -344,7 +345,7 @@ public sealed class MailKitClient : IMailClient
         {
             throw CreateException(
                 ImapFailureKind.InvalidAccountConfiguration,
-                "La cuenta activa no tiene AccountId.",
+                "Active account is missing AccountId.",
                 account,
                 username,
                 folder,
@@ -355,7 +356,7 @@ public sealed class MailKitClient : IMailClient
         {
             throw CreateException(
                 ImapFailureKind.InvalidAccountConfiguration,
-                "La cuenta activa no tiene Email configurado.",
+                "Active account is missing Email.",
                 account,
                 username,
                 folder,
@@ -366,7 +367,7 @@ public sealed class MailKitClient : IMailClient
         {
             throw CreateException(
                 ImapFailureKind.InvalidAccountConfiguration,
-                "La cuenta activa no tiene host IMAP configurado.",
+                "Active account is missing IMAP host.",
                 account,
                 username,
                 folder,
@@ -377,7 +378,7 @@ public sealed class MailKitClient : IMailClient
         {
             throw CreateException(
                 ImapFailureKind.InvalidAccountConfiguration,
-                "La cuenta activa tiene un puerto IMAP inválido.",
+                "Active account has an invalid IMAP port.",
                 account,
                 username,
                 folder,
@@ -388,7 +389,7 @@ public sealed class MailKitClient : IMailClient
         {
             throw CreateException(
                 ImapFailureKind.InvalidAccountConfiguration,
-                "La cuenta activa no tiene usuario IMAP configurado.",
+                "Active account is missing IMAP username.",
                 account,
                 username,
                 folder,
@@ -399,7 +400,7 @@ public sealed class MailKitClient : IMailClient
         {
             throw CreateException(
                 ImapFailureKind.InvalidAccountConfiguration,
-                "La cuenta activa no tiene app password configurado.",
+                "Active account is missing IMAP app password.",
                 account,
                 username,
                 folder,

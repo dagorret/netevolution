@@ -1,4 +1,0 @@
-string dbPath = "mail.db";
-string host = "imap.gmail.com";
-string usuario = "dagorret@gmail.com";
-string password = "qpxobjdlplbtbwua";`

@@ -1,5 +1,7 @@
 using Nevolution.Core;
+using Nevolution.Core.Localization;
 using Nevolution.Core.Models;
+using Nevolution.Core.Resources;
 using Nevolution.Infrastructure.Mail;
 using Nevolution.Infrastructure.Persistence;
 using System.Net;
@@ -16,6 +18,7 @@ internal static class Program
     {
         var dataDir = ResolveDataDirectory();
         Directory.CreateDirectory(dataDir);
+        AppCulture.SetCulture(AppCulturePreferences.LoadPreferredCulture(dataDir));
 
         var databasePath = Path.Combine(dataDir, "mail.db");
         Console.WriteLine($"DB PATH: {databasePath}");
@@ -51,7 +54,7 @@ internal static class Program
 
     private static int PrintUnknownAccountCommand(string action)
     {
-        Console.WriteLine($"Comando de cuenta no reconocido: {action}");
+        Console.WriteLine(string.Format(Strings.Cli_UnknownAccountCommand, action));
         PrintAccountUsage();
         return 1;
     }
@@ -74,7 +77,7 @@ internal static class Program
         };
 
         await repository.SaveAccountAsync(account);
-        Console.WriteLine($"Cuenta guardada: {account.Email}");
+        Console.WriteLine(string.Format(Strings.Cli_AccountSaved, account.Email));
 
         return 0;
     }
@@ -85,7 +88,7 @@ internal static class Program
 
         if (accounts.Count == 0)
         {
-            Console.WriteLine("No hay cuentas configuradas.");
+            Console.WriteLine(Strings.Cli_NoAccountsConfigured);
             return 0;
         }
 
@@ -105,12 +108,12 @@ internal static class Program
 
         if (account is null)
         {
-            Console.WriteLine($"No existe la cuenta '{id}'.");
+            Console.WriteLine(string.Format(Strings.Cli_AccountNotFound, id));
             return 1;
         }
 
         await repository.SetActiveAccountAsync(id);
-        Console.WriteLine($"Cuenta activa: {account.Email}");
+        Console.WriteLine(string.Format(Strings.Cli_ActiveAccount, account.Email));
         return 0;
     }
 
@@ -120,7 +123,7 @@ internal static class Program
 
         if (account is null)
         {
-            Console.WriteLine("No hay una cuenta activa en SQLite. Usa `account add` y luego `account use`.");
+            Console.WriteLine(Strings.Cli_NoActiveAccount);
             return 1;
         }
 
@@ -134,20 +137,20 @@ internal static class Program
             var folders = await mailClient.GetKnownFoldersAsync(account);
             var folder = ResolveFolder(folderOption, folders).ImapFolderName;
 
-            Console.WriteLine($"Resolviendo host IMAP {account.ImapHost}...");
+            Console.WriteLine(string.Format(Strings.Cli_ResolvingHost, account.ImapHost));
 
             if (!await CanResolveHost(account.ImapHost))
             {
-                Console.WriteLine("ERROR: No se pudo resolver el host");
+                Console.WriteLine($"{Strings.Cli_ErrorPrefix} {Strings.Cli_HostResolutionFailed}");
                 return 1;
             }
 
-            Console.WriteLine($"Sincronizando carpeta {folder} para {account.Email}...");
+            Console.WriteLine(string.Format(Strings.Cli_SyncingFolder, folder, account.Email));
             await syncService.SyncFolderAsync(account, folder);
             await bodySyncService.DownloadMissingBodiesAsync(account, folder, batchSize: 25);
 
             var emails = await repository.GetEmailsAsync(account.Id, folder, 500);
-            Console.WriteLine($"Correos sincronizados: {emails.Count}");
+            Console.WriteLine(string.Format(Strings.Cli_SyncedEmailsCount, emails.Count));
 
             return 0;
         }
@@ -189,8 +192,8 @@ internal static class Program
     {
         if (exception is ImapConnectionException imapException)
         {
-            Console.WriteLine($"ERROR: {imapException.UserMessage}");
-            Console.WriteLine($"DETAIL: {imapException.ToDiagnosticString()}");
+            Console.WriteLine($"{Strings.Cli_ErrorPrefix} {imapException.UserMessage}");
+            Console.WriteLine($"{Strings.Cli_DetailPrefix} {imapException.ToDiagnosticString()}");
             return;
         }
 
@@ -200,27 +203,27 @@ internal static class Program
         {
             if (socketException.SocketErrorCode is SocketError.HostNotFound or SocketError.TryAgain or SocketError.NoData)
             {
-                Console.WriteLine("ERROR: No se pudo resolver el host");
+                Console.WriteLine($"{Strings.Cli_ErrorPrefix} {Strings.Cli_HostResolutionFailed}");
                 return;
             }
 
-            Console.WriteLine($"ERROR: No se pudo establecer la conexión ({socketException.Message})");
+            Console.WriteLine($"{Strings.Cli_ErrorPrefix} {string.Format(Strings.Cli_ConnectionFailed, socketException.Message)}");
             return;
         }
 
         if (rootException is AuthenticationException)
         {
-            Console.WriteLine("ERROR: Falló la autenticación IMAP. Verifica el email completo y el password.");
+            Console.WriteLine($"{Strings.Cli_ErrorPrefix} {Strings.Cli_AuthenticationFailed}");
             return;
         }
 
-        Console.WriteLine($"ERROR: {exception.Message}");
+        Console.WriteLine($"{Strings.Cli_ErrorPrefix} {exception.Message}");
     }
 
     private static string GetRequiredOption(IReadOnlyList<string> args, string option)
     {
         return GetOption(args, option)
-               ?? throw new InvalidOperationException($"Falta el argumento requerido {option}.");
+               ?? throw new InvalidOperationException(string.Format(Strings.Cli_RequiredArgumentMissing, option));
     }
 
     private static string? GetOption(IReadOnlyList<string> args, string option)
@@ -249,10 +252,10 @@ internal static class Program
 
     private static void PrintAccountUsage()
     {
-        Console.WriteLine("Uso:");
-        Console.WriteLine("  account add --email <mail> --password <password> [--display-name <name>] [--imap-host <host>] [--imap-port <port>] [--username <user>] [--active]");
-        Console.WriteLine("  account list");
-        Console.WriteLine("  account use --id <account-id>");
+        Console.WriteLine(Strings.Cli_UsageHeader);
+        Console.WriteLine(Strings.Cli_UsageAccountAdd);
+        Console.WriteLine(Strings.Cli_UsageAccountList);
+        Console.WriteLine(Strings.Cli_UsageAccountUse);
     }
 
     private static string ResolveDataDirectory()

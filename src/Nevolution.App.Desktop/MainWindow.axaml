@@ -11,8 +11,24 @@
         Width="900"
         Height="600"
         Title="{localization:Loc MainWindow_Title}">
-    <Grid RowDefinitions="Auto,*" ColumnDefinitions="2*,3*">
-        <StackPanel Grid.Row="0" Grid.ColumnSpan="2" Margin="10" Spacing="8">
+    <Grid RowDefinitions="Auto,Auto,*" ColumnDefinitions="2*,3*">
+        <Menu Grid.Row="0" Grid.ColumnSpan="2">
+            <MenuItem Header="{localization:Loc Menu_File}">
+                <MenuItem Header="{localization:Loc Menu_Close}" Click="OnCloseMenuItemClick" />
+            </MenuItem>
+            <MenuItem Header="{localization:Loc Menu_Account}">
+                <MenuItem Header="{localization:Loc Menu_AddAccount}" Click="OnAddAccountMenuItemClick" />
+                <MenuItem Header="{localization:Loc Menu_SwitchAccount}" IsEnabled="False" />
+            </MenuItem>
+            <MenuItem Header="{localization:Loc Menu_View}">
+                <MenuItem Header="{localization:Loc Menu_ViewRefresh}" IsEnabled="False" />
+            </MenuItem>
+            <MenuItem Header="{localization:Loc Menu_Help}">
+                <MenuItem Header="{localization:Loc Menu_About}" IsEnabled="False" />
+            </MenuItem>
+        </Menu>
+
+        <StackPanel Grid.Row="1" Grid.ColumnSpan="2" Margin="10" Spacing="8">
             <ComboBox ItemsSource="{Binding Accounts}"
                       SelectedItem="{Binding SelectedAccount}">
                 <ComboBox.ItemTemplate>
@@ -58,7 +74,7 @@
                        TextWrapping="Wrap" />
         </StackPanel>
 
-        <Grid Grid.Row="1" Grid.Column="0" RowDefinitions="*,Auto">
+        <Grid Grid.Row="2" Grid.Column="0" RowDefinitions="*,Auto">
             <Grid Grid.Row="0">
                 <ListBox ItemsSource="{Binding Emails}"
                          SelectedItem="{Binding SelectedEmail}">
@@ -90,7 +106,7 @@
                     IsVisible="{Binding HasMoreEmails}" />
         </Grid>
 
-        <ScrollViewer Grid.Row="1" Grid.Column="1" Margin="10">
+        <ScrollViewer Grid.Row="2" Grid.Column="1" Margin="10">
             <StackPanel>
                 <TextBlock Text="{Binding SelectedEmail.Subject}" FontWeight="Bold" FontSize="16"/>
                 <TextBlock Text="{Binding SelectedEmail.From}" FontSize="12"/>

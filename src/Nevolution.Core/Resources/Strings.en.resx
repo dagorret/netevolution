@@ -111,6 +111,90 @@
   <data name="MainWindow_Title" xml:space="preserve">
     <value>Nevolution</value>
   </data>
+  <data name="Menu_File" xml:space="preserve">
+    <value>File</value>
+  </data>
+  <data name="Menu_Account" xml:space="preserve">
+    <value>Account</value>
+  </data>
+  <data name="Menu_View" xml:space="preserve">
+    <value>View</value>
+  </data>
+  <data name="Menu_Help" xml:space="preserve">
+    <value>Help</value>
+  </data>
+  <data name="Menu_AddAccount" xml:space="preserve">
+    <value>Add account</value>
+  </data>
+  <data name="Menu_SwitchAccount" xml:space="preserve">
+    <value>Switch account</value>
+  </data>
+  <data name="Menu_ViewRefresh" xml:space="preserve">
+    <value>Refresh view</value>
+  </data>
+  <data name="Menu_About" xml:space="preserve">
+    <value>About</value>
+  </data>
+  <data name="Menu_Close" xml:space="preserve">
+    <value>Close</value>
+  </data>
+  <data name="AccountDialog_Title" xml:space="preserve">
+    <value>Add account</value>
+  </data>
+  <data name="AccountDialog_Hint" xml:space="preserve">
+    <value>The password is stored in the system keyring and not in SQLite.</value>
+  </data>
+  <data name="AccountDialog_DisplayName" xml:space="preserve">
+    <value>Display name</value>
+  </data>
+  <data name="AccountDialog_Email" xml:space="preserve">
+    <value>Email</value>
+  </data>
+  <data name="AccountDialog_ImapHost" xml:space="preserve">
+    <value>IMAP host</value>
+  </data>
+  <data name="AccountDialog_ImapPort" xml:space="preserve">
+    <value>IMAP port</value>
+  </data>
+  <data name="AccountDialog_Username" xml:space="preserve">
+    <value>Username</value>
+  </data>
+  <data name="AccountDialog_Password" xml:space="preserve">
+    <value>App password</value>
+  </data>
+  <data name="AccountDialog_UseAsActive" xml:space="preserve">
+    <value>Use this account immediately</value>
+  </data>
+  <data name="AccountDialog_Save" xml:space="preserve">
+    <value>Save</value>
+  </data>
+  <data name="AccountDialog_Cancel" xml:space="preserve">
+    <value>Cancel</value>
+  </data>
+  <data name="AccountDialog_ErrorDisplayNameRequired" xml:space="preserve">
+    <value>Enter a display name.</value>
+  </data>
+  <data name="AccountDialog_ErrorEmailRequired" xml:space="preserve">
+    <value>Enter an email address.</value>
+  </data>
+  <data name="AccountDialog_ErrorImapHostRequired" xml:space="preserve">
+    <value>Enter the IMAP host.</value>
+  </data>
+  <data name="AccountDialog_ErrorImapPortInvalid" xml:space="preserve">
+    <value>Enter a valid IMAP port.</value>
+  </data>
+  <data name="AccountDialog_ErrorUsernameRequired" xml:space="preserve">
+    <value>Enter a username.</value>
+  </data>
+  <data name="AccountDialog_ErrorPasswordRequired" xml:space="preserve">
+    <value>Enter the app password.</value>
+  </data>
+  <data name="AccountDialog_ErrorDuplicateEmail" xml:space="preserve">
+    <value>An account with that email already exists.</value>
+  </data>
+  <data name="AccountDialog_ErrorSaveFailed" xml:space="preserve">
+    <value>Could not save the account. Check the configuration and try again.</value>
+  </data>
   <data name="Status_BackgroundDownloadStopped" xml:space="preserve">
     <value>Background download stopped because of an error in the active account.</value>
   </data>
@@ -128,6 +212,9 @@
   </data>
   <data name="Status_InitialLoadFailedImap" xml:space="preserve">
     <value>Initial load failed. Check the active account or IMAP configuration.</value>
+  </data>
+  <data name="Status_LoadingLocalEmails" xml:space="preserve">
+    <value>Loading local emails...</value>
   </data>
   <data name="Status_NoLocalEmailsYet" xml:space="preserve">
     <value>No local emails yet.</value>

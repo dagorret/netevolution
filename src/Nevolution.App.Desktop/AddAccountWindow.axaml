@@ -1,0 +1,63 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:localization="using:Nevolution.App.Desktop.Localization"
+        xmlns:viewModels="using:Nevolution.App.Desktop.ViewModels"
+        mc:Ignorable="d"
+        x:Class="Nevolution.App.Desktop.AddAccountWindow"
+        x:DataType="viewModels:AccountEditorViewModel"
+        Width="460"
+        SizeToContent="Height"
+        WindowStartupLocation="CenterOwner"
+        Title="{localization:Loc AccountDialog_Title}"
+        CanResize="False">
+    <Border Padding="20">
+        <StackPanel Spacing="12">
+            <TextBlock Text="{localization:Loc AccountDialog_Hint}"
+                       TextWrapping="Wrap"
+                       Foreground="Gray" />
+
+            <Grid ColumnDefinitions="140,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto" RowSpacing="10" ColumnSpacing="12">
+                <TextBlock Grid.Row="0" Grid.Column="0" VerticalAlignment="Center" Text="{localization:Loc AccountDialog_DisplayName}" />
+                <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding DisplayName}" />
+
+                <TextBlock Grid.Row="1" Grid.Column="0" VerticalAlignment="Center" Text="{localization:Loc AccountDialog_Email}" />
+                <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding Email}" />
+
+                <TextBlock Grid.Row="2" Grid.Column="0" VerticalAlignment="Center" Text="{localization:Loc AccountDialog_ImapHost}" />
+                <TextBox Grid.Row="2" Grid.Column="1" Text="{Binding ImapHost}" />
+
+                <TextBlock Grid.Row="3" Grid.Column="0" VerticalAlignment="Center" Text="{localization:Loc AccountDialog_ImapPort}" />
+                <TextBox Grid.Row="3" Grid.Column="1" Text="{Binding ImapPort}" />
+
+                <TextBlock Grid.Row="4" Grid.Column="0" VerticalAlignment="Center" Text="{localization:Loc AccountDialog_Username}" />
+                <TextBox Grid.Row="4" Grid.Column="1" Text="{Binding Username}" />
+
+                <TextBlock Grid.Row="5" Grid.Column="0" VerticalAlignment="Center" Text="{localization:Loc AccountDialog_Password}" />
+                <TextBox Grid.Row="5" Grid.Column="1" Text="{Binding Password}" />
+
+                <CheckBox Grid.Row="6" Grid.Column="1"
+                          Content="{localization:Loc AccountDialog_UseAsActive}"
+                          IsChecked="{Binding UseAsActive}" />
+            </Grid>
+
+            <TextBlock Text="{Binding ValidationMessage}"
+                       IsVisible="{Binding HasValidationMessage}"
+                       Foreground="DarkOrange"
+                       TextWrapping="Wrap" />
+
+            <TextBlock Text="{Binding SaveErrorMessage}"
+                       IsVisible="{Binding HasSaveErrorMessage}"
+                       Foreground="IndianRed"
+                       TextWrapping="Wrap" />
+
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+                <Button Content="{localization:Loc AccountDialog_Cancel}" Click="OnCancelClick" />
+                <Button Content="{localization:Loc AccountDialog_Save}"
+                        Click="OnSaveClick"
+                        IsEnabled="{Binding CanSubmit}" />
+            </StackPanel>
+        </StackPanel>
+    </Border>
+</Window>

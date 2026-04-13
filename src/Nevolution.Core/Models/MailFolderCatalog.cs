@@ -15,20 +15,36 @@ public static class MailFolderCatalog
 
     public static MailFolderKind ParseKind(string? value)
     {
+        return TryResolveKind(value, out var kind)
+            ? kind
+            : MailFolderKind.Inbox;
+    }
+
+    public static bool TryResolveKind(string? value, out MailFolderKind kind)
+    {
         if (string.IsNullOrWhiteSpace(value))
         {
-            return MailFolderKind.Inbox;
+            kind = MailFolderKind.Inbox;
+            return false;
         }
 
-        return value.Trim().ToLowerInvariant() switch
+        var normalized = value.Trim();
+        var leaf = normalized.Split(['/', '\\'], StringSplitOptions.RemoveEmptyEntries).LastOrDefault() ?? normalized;
+
+        kind = leaf.Trim().ToLowerInvariant() switch
         {
             "inbox" => MailFolderKind.Inbox,
-            "sent" or "sentitems" or "sent-items" => MailFolderKind.Sent,
-            "drafts" => MailFolderKind.Drafts,
-            "trash" or "bin" or "deleted" => MailFolderKind.Trash,
+            "sent" or "sentitems" or "sent-items" or "sent mail" or "sent items" or "enviados" => MailFolderKind.Sent,
+            "drafts" or "borradores" => MailFolderKind.Drafts,
+            "trash" or "bin" or "deleted" or "deleted items" or "papelera" => MailFolderKind.Trash,
             "archive" or "allmail" or "all-mail" => MailFolderKind.Archive,
-            _ => Enum.TryParse<MailFolderKind>(value, true, out var parsedKind) ? parsedKind : MailFolderKind.Inbox
+            _ when Enum.TryParse<MailFolderKind>(leaf, true, out var parsedKind) => parsedKind,
+            _ => default
         };
+
+        return normalized.Equals("INBOX", StringComparison.OrdinalIgnoreCase)
+            || kind is MailFolderKind.Sent or MailFolderKind.Drafts or MailFolderKind.Trash or MailFolderKind.Archive
+            || string.Equals(leaf, "inbox", StringComparison.OrdinalIgnoreCase);
     }
 
     public static MailFolderInfo GetDefault(MailFolderKind kind)

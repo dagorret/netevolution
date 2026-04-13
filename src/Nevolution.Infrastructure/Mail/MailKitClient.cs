@@ -3,6 +3,7 @@ using MailKit.Net.Imap;
 using MailKit.Search;
 using MailKit.Security;
 using MimeKit;
+using Nevolution.Core;
 using Nevolution.Core.Abstractions;
 using Nevolution.Core.Models;
 using Nevolution.Core.Resources;
@@ -24,7 +25,139 @@ public sealed class MailKitClient : IMailClient
     private readonly ImapClient _imapClient = new();
     private MailAccount? _connectedAccount;
 
-    public async Task ConnectAsync(MailAccount account)
+    public async Task<IReadOnlyList<MailFolderInfo>> GetKnownFoldersAsync(MailAccount account)
+    {
+        ArgumentNullException.ThrowIfNull(account);
+        await EnsureConnectedAsync(account);
+
+        var allFolders = await GetAllFoldersAsync();
+        var folders = new List<MailFolderInfo>(KnownFolders.Length);
+
+        foreach (var definition in KnownFolders)
+        {
+            var resolvedFolder = ResolveFolder(definition.SpecialFolder, definition.FallbackNames, allFolders);
+
+            folders.Add(new MailFolderInfo
+            {
+                Kind = definition.Kind,
+                DisplayName = definition.DisplayName,
+                ImapFolderName = resolvedFolder?.FullName ?? definition.FallbackNames[0]
+            });
+        }
+
+        return folders;
+    }
+
+    public async Task<SyncHeadersResult> SyncHeadersAsync(
+        MailAccount account,
+        string folder,
+        uint fromUid,
+        CancellationToken cancellationToken = default)
+    {
+        await EnsureConnectedAsync(account);
+        cancellationToken.ThrowIfCancellationRequested();
+        var mailFolder = await OpenFolderAsync(folder);
+        var uidValidity = mailFolder.UidValidity;
+        cancellationToken.ThrowIfCancellationRequested();
+        var serverUids = await mailFolder.SearchAsync(SearchQuery.All);
+        var incrementalUids = FilterIncrementalUids(serverUids, fromUid);
+
+        if (incrementalUids.Count == 0)
+        {
+            return new SyncHeadersResult
+            {
+                UidValidity = uidValidity,
+                ServerUids = serverUids.Select(uid => uid.Id).ToList(),
+                NewEmails = []
+            };
+        }
+
+        var summaries = await mailFolder.FetchAsync(
+            incrementalUids,
+            MessageSummaryItems.Envelope | MessageSummaryItems.UniqueId);
+
+        var accountId = _connectedAccount?.Id ?? string.Empty;
+        var emails = new List<EmailMessage>(summaries.Count);
+
+        foreach (var summary in summaries)
+        {
+            var envelope = summary.Envelope;
+
+            emails.Add(new EmailMessage
+            {
+                AccountId = accountId,
+                Folder = folder,
+                ImapUid = summary.UniqueId.Id,
+                Subject = envelope?.Subject ?? string.Empty,
+                From = envelope?.From?.ToString() ?? string.Empty,
+                Date = envelope?.Date?.DateTime ?? DateTime.MinValue,
+                HasBody = false
+            });
+        }
+
+        return new SyncHeadersResult
+        {
+            UidValidity = uidValidity,
+            ServerUids = serverUids.Select(uid => uid.Id).ToList(),
+            NewEmails = emails
+        };
+    }
+
+    public async Task<EmailBody> GetBodyAsync(MailAccount account, string folder, uint uid, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(account);
+        ValidateAccount(account, folder, uid);
+        var username = ResolveUsername(account);
+        Console.WriteLine(
+            $"GetBodyAsync: {FormatContext(account, username, folder, uid)}");
+        cancellationToken.ThrowIfCancellationRequested();
+        await EnsureConnectedAsync(account);
+
+        if (string.IsNullOrWhiteSpace(folder))
+        {
+            throw CreateException(
+                ImapFailureKind.InvalidAccountConfiguration,
+                "GetBodyAsync received an empty folder.",
+                account,
+                username,
+                folder,
+                uid);
+        }
+
+        if (uid == 0)
+        {
+            throw CreateException(
+                ImapFailureKind.InvalidAccountConfiguration,
+                "GetBodyAsync received uid=0.",
+                account,
+                username,
+                folder,
+                uid);
+        }
+
+        cancellationToken.ThrowIfCancellationRequested();
+        var mailFolder = await _imapClient.GetFolderAsync(folder);
+        await mailFolder.OpenAsync(FolderAccess.ReadOnly);
+        Console.WriteLine($"GetBodyAsync: opened folder {folder}");
+        Console.WriteLine($"GetBodyAsync: fetching UID {uid}");
+        try
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var message = await mailFolder.GetMessageAsync(new UniqueId(uid));
+            Console.WriteLine($"GetBodyAsync: message found for UID {uid}");
+            var body = GetMessageBody(message);
+            Console.WriteLine(
+                $"GetBodyAsync: text length={body.TextBody.Length}, html length={body.HtmlBody.Length}");
+
+            return body;
+        }
+        catch (MessageNotFoundException exception)
+        {
+            throw new ImapMessageNotFoundException(account, folder, uid, exception);
+        }
+    }
+
+    private async Task EnsureConnectedAsync(MailAccount account)
     {
         ArgumentNullException.ThrowIfNull(account);
         ValidateAccount(account);
@@ -32,17 +165,25 @@ public sealed class MailKitClient : IMailClient
 
         try
         {
+            if (_imapClient.IsConnected
+                && _imapClient.IsAuthenticated
+                && _connectedAccount is not null
+                && string.Equals(_connectedAccount.Id, account.Id, StringComparison.Ordinal))
+            {
+                Console.WriteLine($"[IMAP] reuse connection accountId={account.Id} host={account.ImapHost} port={account.ImapPort}");
+                return;
+            }
+
             if (_imapClient.IsConnected)
             {
                 await _imapClient.DisconnectAsync(true);
             }
 
             _connectedAccount = account;
-
-            Console.WriteLine($"IMAP connect: {FormatContext(account, username)}");
+            Console.WriteLine($"[IMAP] connect accountId={account.Id} host={account.ImapHost} port={account.ImapPort} user={username}");
             await _imapClient.ConnectAsync(account.ImapHost, account.ImapPort, GetSecureSocketOptions(account.ImapPort));
 
-            Console.WriteLine($"IMAP authenticate: {FormatContext(account, username)}");
+            Console.WriteLine($"[IMAP] authenticate accountId={account.Id} host={account.ImapHost} port={account.ImapPort} user={username}");
             await _imapClient.AuthenticateAsync(username, account.Password);
         }
         catch (SocketException exception) when (exception.SocketErrorCode is SocketError.HostNotFound or SocketError.TryAgain or SocketError.NoData)
@@ -90,134 +231,6 @@ public sealed class MailKitClient : IMailClient
                 username,
                 innerException: exception);
         }
-    }
-
-    public async Task<IReadOnlyList<MailFolderInfo>> GetKnownFoldersAsync(MailAccount account)
-    {
-        ArgumentNullException.ThrowIfNull(account);
-
-        if (!_imapClient.IsConnected
-            || !_imapClient.IsAuthenticated
-            || _connectedAccount is null
-            || !string.Equals(_connectedAccount.Id, account.Id, StringComparison.Ordinal))
-        {
-            await ConnectAsync(account);
-        }
-
-        EnsureConnected();
-
-        var allFolders = await GetAllFoldersAsync();
-        var folders = new List<MailFolderInfo>(KnownFolders.Length);
-
-        foreach (var definition in KnownFolders)
-        {
-            var resolvedFolder = ResolveFolder(definition.SpecialFolder, definition.FallbackNames, allFolders);
-
-            folders.Add(new MailFolderInfo
-            {
-                Kind = definition.Kind,
-                DisplayName = definition.DisplayName,
-                ImapFolderName = resolvedFolder?.FullName ?? definition.FallbackNames[0]
-            });
-        }
-
-        return folders;
-    }
-
-    public async Task<uint> GetUidValidityAsync(string folder)
-    {
-        var mailFolder = await OpenFolderAsync(folder);
-        return mailFolder.UidValidity;
-    }
-
-    public async Task<IList<EmailMessage>> FetchHeadersAsync(string folder, uint fromUid)
-    {
-        var mailFolder = await OpenFolderAsync(folder);
-        var uids = await SearchUidsAsync(mailFolder, fromUid);
-
-        if (uids.Count == 0)
-        {
-            return [];
-        }
-
-        var summaries = await mailFolder.FetchAsync(
-            uids,
-            MessageSummaryItems.Envelope | MessageSummaryItems.UniqueId);
-
-        var accountId = _connectedAccount?.Id ?? string.Empty;
-        var emails = new List<EmailMessage>(summaries.Count);
-
-        foreach (var summary in summaries)
-        {
-            var envelope = summary.Envelope;
-
-            emails.Add(new EmailMessage
-            {
-                AccountId = accountId,
-                Folder = folder,
-                ImapUid = summary.UniqueId.Id,
-                Subject = envelope?.Subject ?? string.Empty,
-                From = envelope?.From?.ToString() ?? string.Empty,
-                Date = envelope?.Date?.DateTime ?? DateTime.MinValue,
-                HasBody = false
-            });
-        }
-
-        return emails;
-    }
-
-    public async Task<EmailBody> GetBodyAsync(MailAccount account, string folder, uint uid)
-    {
-        ArgumentNullException.ThrowIfNull(account);
-        ValidateAccount(account, folder, uid);
-        var username = ResolveUsername(account);
-        Console.WriteLine(
-            $"GetBodyAsync: {FormatContext(account, username, folder, uid)}");
-
-        if (!_imapClient.IsConnected
-            || !_imapClient.IsAuthenticated
-            || _connectedAccount is null
-            || !string.Equals(_connectedAccount.Id, account.Id, StringComparison.Ordinal))
-        {
-            Console.WriteLine("GetBodyAsync: connecting IMAP client");
-            await ConnectAsync(account);
-            Console.WriteLine("GetBodyAsync: connected");
-        }
-
-        if (string.IsNullOrWhiteSpace(folder))
-        {
-            throw CreateException(
-                ImapFailureKind.InvalidAccountConfiguration,
-                "GetBodyAsync received an empty folder.",
-                account,
-                username,
-                folder,
-                uid);
-        }
-
-        if (uid == 0)
-        {
-            throw CreateException(
-                ImapFailureKind.InvalidAccountConfiguration,
-                "GetBodyAsync received uid=0.",
-                account,
-                username,
-                folder,
-                uid);
-        }
-
-        EnsureConnected();
-        var mailFolder = await _imapClient.GetFolderAsync(folder);
-        await mailFolder.OpenAsync(FolderAccess.ReadOnly);
-        Console.WriteLine($"GetBodyAsync: opened folder {folder}");
-        Console.WriteLine($"GetBodyAsync: fetching UID {uid}");
-        var message = await mailFolder.GetMessageAsync(new UniqueId(uid));
-        Console.WriteLine($"GetBodyAsync: message found for UID {uid}");
-        var body = GetMessageBody(message);
-        Console.WriteLine(
-            $"GetBodyAsync: text length={body.TextBody.Length}, html length={body.HtmlBody.Length}");
-
-        return body;
     }
 
     private async Task<IMailFolder> OpenFolderAsync(string folder)
@@ -284,11 +297,11 @@ public sealed class MailKitClient : IMailClient
                 || string.Equals(folder.FullName, name, StringComparison.OrdinalIgnoreCase)));
     }
 
-    private async Task<IList<UniqueId>> SearchUidsAsync(IMailFolder mailFolder, uint fromUid)
+    private static IList<UniqueId> FilterIncrementalUids(IEnumerable<UniqueId> serverUids, uint fromUid)
     {
         if (fromUid == 0)
         {
-            return await mailFolder.SearchAsync(SearchQuery.All);
+            return serverUids.ToList();
         }
 
         if (fromUid == uint.MaxValue)
@@ -296,10 +309,7 @@ public sealed class MailKitClient : IMailClient
             return [];
         }
 
-        var startUid = new UniqueId(fromUid + 1);
-        var range = new UniqueIdRange(startUid, UniqueId.MaxValue);
-
-        return await mailFolder.SearchAsync(SearchQuery.Uids(range));
+        return serverUids.Where(uid => uid.Id > fromUid).ToList();
     }
 
     private void EnsureConnected()

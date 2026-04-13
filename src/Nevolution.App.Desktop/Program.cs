@@ -1,17 +1,20 @@
 ﻿using Avalonia;
 using System;
+using System.Diagnostics;
 
 namespace Nevolution.App.Desktop;
 
 class Program
 {
+    internal static readonly Stopwatch StartupStopwatch = Stopwatch.StartNew();
+
     // Initialization code. Don't use any Avalonia, third-party APIs or any
     // SynchronizationContext-reliant code before AppMain is called: things aren't initialized
     // yet and stuff might break.
     [STAThread]
     public static void Main(string[] args)
     {
-        Console.WriteLine("Desktop startup: Program.Main");
+        Console.WriteLine("[Startup] Process started");
         AppDomain.CurrentDomain.UnhandledException += OnUnhandledException;
         TaskScheduler.UnobservedTaskException += OnUnobservedTaskException;
 

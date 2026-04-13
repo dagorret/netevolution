@@ -7,12 +7,15 @@ namespace Nevolution.Infrastructure.Persistence;
 public sealed class SqliteEmailRepository : IEmailRepository
 {
     private readonly string _connectionString;
+    private readonly ISecretStore _secretStore;
 
-    public SqliteEmailRepository(string databasePath)
+    public SqliteEmailRepository(string databasePath, ISecretStore secretStore)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(databasePath);
+        ArgumentNullException.ThrowIfNull(secretStore);
 
         _connectionString = $"Data Source={databasePath}";
+        _secretStore = secretStore;
         Console.WriteLine($"Using SQLite DB: {_connectionString}");
         InitializeDatabase();
     }
@@ -29,7 +32,7 @@ public sealed class SqliteEmailRepository : IEmailRepository
         command.Transaction = transaction;
         command.CommandText =
             """
-            INSERT OR IGNORE INTO Emails (
+            INSERT INTO Emails (
                 Id,
                 AccountId,
                 Folder,
@@ -42,7 +45,9 @@ public sealed class SqliteEmailRepository : IEmailRepository
                 Body,
                 TextBody,
                 HtmlBody,
-                IsRead
+                IsRead,
+                BodyUnavailable,
+                DeletedOnServer
             )
             VALUES (
                 $id,
@@ -57,8 +62,16 @@ public sealed class SqliteEmailRepository : IEmailRepository
                 $body,
                 $textBody,
                 $htmlBody,
-                $isRead
-            );
+                $isRead,
+                $bodyUnavailable,
+                $deletedOnServer
+            )
+            ON CONFLICT(AccountId, Folder, Uid) DO UPDATE SET
+                Subject = excluded.Subject,
+                FromAddress = excluded.FromAddress,
+                Date = excluded.Date,
+                BodyUnavailable = 0,
+                DeletedOnServer = 0;
             """;
 
         var idParameter = command.CreateParameter();
@@ -113,6 +126,14 @@ public sealed class SqliteEmailRepository : IEmailRepository
         isReadParameter.ParameterName = "$isRead";
         command.Parameters.Add(isReadParameter);
 
+        var bodyUnavailableParameter = command.CreateParameter();
+        bodyUnavailableParameter.ParameterName = "$bodyUnavailable";
+        command.Parameters.Add(bodyUnavailableParameter);
+
+        var deletedOnServerParameter = command.CreateParameter();
+        deletedOnServerParameter.ParameterName = "$deletedOnServer";
+        command.Parameters.Add(deletedOnServerParameter);
+
         foreach (var email in emails)
         {
             idParameter.Value = email.Id;
@@ -128,11 +149,80 @@ public sealed class SqliteEmailRepository : IEmailRepository
             textBodyParameter.Value = DBNull.Value;
             htmlBodyParameter.Value = DBNull.Value;
             isReadParameter.Value = email.IsRead ? 1 : 0;
+            bodyUnavailableParameter.Value = email.BodyUnavailable ? 1 : 0;
+            deletedOnServerParameter.Value = email.DeletedOnServer ? 1 : 0;
 
             await command.ExecuteNonQueryAsync();
         }
 
         await transaction.CommitAsync();
+    }
+
+    public async Task<int> SoftDeleteMissingEmailsAsync(string accountId, string folder, IReadOnlyCollection<uint> serverUids)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(accountId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(folder);
+        ArgumentNullException.ThrowIfNull(serverUids);
+
+        await using var connection = CreateConnection();
+        await connection.OpenAsync();
+
+        await using var command = connection.CreateCommand();
+        command.CommandText =
+            """
+            UPDATE Emails
+            SET DeletedOnServer = 1,
+                BodyUnavailable = CASE WHEN HasBody = 1 THEN BodyUnavailable ELSE 1 END
+            WHERE AccountId = $accountId
+              AND UPPER(Folder) = UPPER($folder)
+              AND COALESCE(DeletedOnServer, 0) = 0
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM json_each($serverUids)
+                  WHERE CAST(json_each.value AS INTEGER) = Emails.Uid
+              );
+            """;
+        command.Parameters.AddWithValue("$accountId", accountId);
+        command.Parameters.AddWithValue("$folder", folder);
+        command.Parameters.AddWithValue("$serverUids", SerializeUInts(serverUids));
+
+        return await command.ExecuteNonQueryAsync();
+    }
+
+    public async Task<int> RestoreSoftDeletedEmailsAsync(string accountId, string folder, IReadOnlyCollection<uint> serverUids)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(accountId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(folder);
+        ArgumentNullException.ThrowIfNull(serverUids);
+
+        if (serverUids.Count == 0)
+        {
+            return 0;
+        }
+
+        await using var connection = CreateConnection();
+        await connection.OpenAsync();
+
+        await using var command = connection.CreateCommand();
+        command.CommandText =
+            """
+            UPDATE Emails
+            SET DeletedOnServer = 0,
+                BodyUnavailable = CASE WHEN HasBody = 1 THEN 0 ELSE BodyUnavailable END
+            WHERE AccountId = $accountId
+              AND UPPER(Folder) = UPPER($folder)
+              AND COALESCE(DeletedOnServer, 0) = 1
+              AND EXISTS (
+                  SELECT 1
+                  FROM json_each($serverUids)
+                  WHERE CAST(json_each.value AS INTEGER) = Emails.Uid
+              );
+            """;
+        command.Parameters.AddWithValue("$accountId", accountId);
+        command.Parameters.AddWithValue("$folder", folder);
+        command.Parameters.AddWithValue("$serverUids", SerializeUInts(serverUids));
+
+        return await command.ExecuteNonQueryAsync();
     }
 
     public async Task UpdateBodyAsync(string id, EmailBody body)
@@ -156,6 +246,8 @@ public sealed class SqliteEmailRepository : IEmailRepository
                 END,
                 TextBody = $textBody,
                 HtmlBody = $htmlBody,
+                BodyUnavailable = 0,
+                DeletedOnServer = 0,
                 HasBody = CASE
                     WHEN LENGTH(TRIM($textBody)) > 0 OR LENGTH(TRIM($htmlBody)) > 0 THEN 1
                     ELSE 0
@@ -165,6 +257,25 @@ public sealed class SqliteEmailRepository : IEmailRepository
         command.Parameters.AddWithValue("$id", id);
         command.Parameters.AddWithValue("$textBody", body.TextBody ?? string.Empty);
         command.Parameters.AddWithValue("$htmlBody", body.HtmlBody ?? string.Empty);
+
+        await command.ExecuteNonQueryAsync();
+    }
+
+    public async Task MarkBodyUnavailableAsync(string id)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(id);
+
+        await using var connection = CreateConnection();
+        await connection.OpenAsync();
+
+        await using var command = connection.CreateCommand();
+        command.CommandText =
+            """
+            UPDATE Emails
+            SET BodyUnavailable = 1
+            WHERE Id = $id;
+            """;
+        command.Parameters.AddWithValue("$id", id);
 
         await command.ExecuteNonQueryAsync();
     }
@@ -202,13 +313,75 @@ public sealed class SqliteEmailRepository : IEmailRepository
             SELECT COALESCE(MAX(Uid), 0)
             FROM Emails
             WHERE AccountId = $accountId
-              AND Folder = $folder;
+              AND Folder = $folder
+              AND COALESCE(DeletedOnServer, 0) = 0;
             """;
         command.Parameters.AddWithValue("$accountId", accountId);
         command.Parameters.AddWithValue("$folder", folder);
 
         var result = await command.ExecuteScalarAsync();
         return ConvertToUInt32(result);
+    }
+
+    public async Task<int> GetVisibleEmailCountAsync(string accountId, string folder)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(accountId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(folder);
+
+        await using var connection = CreateConnection();
+        await connection.OpenAsync();
+
+        await using var command = connection.CreateCommand();
+        command.CommandText =
+            """
+            SELECT COUNT(1)
+            FROM Emails
+            WHERE AccountId = $accountId
+              AND UPPER(Folder) = UPPER($folder)
+              AND COALESCE(DeletedOnServer, 0) = 0;
+            """;
+        command.Parameters.AddWithValue("$accountId", accountId);
+        command.Parameters.AddWithValue("$folder", folder);
+
+        var result = await command.ExecuteScalarAsync();
+        return Convert.ToInt32(result ?? 0);
+    }
+
+    public async Task<FolderLoadStats> GetFolderLoadStatsAsync(string accountId, string folder)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(accountId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(folder);
+
+        await using var connection = CreateConnection();
+        await connection.OpenAsync();
+
+        await using var command = connection.CreateCommand();
+        command.CommandText =
+            """
+            SELECT
+                COUNT(1) AS TotalCount,
+                SUM(CASE WHEN COALESCE(DeletedOnServer, 0) = 0 THEN 1 ELSE 0 END) AS VisibleCount,
+                SUM(CASE WHEN COALESCE(DeletedOnServer, 0) = 1 THEN 1 ELSE 0 END) AS SoftDeletedCount,
+                SUM(CASE WHEN COALESCE(BodyUnavailable, 0) = 1 THEN 1 ELSE 0 END) AS BodyUnavailableCount
+            FROM Emails
+            WHERE AccountId = $accountId
+              AND UPPER(Folder) = UPPER($folder);
+            """;
+        command.Parameters.AddWithValue("$accountId", accountId);
+        command.Parameters.AddWithValue("$folder", folder);
+
+        await using var reader = await command.ExecuteReaderAsync();
+        await reader.ReadAsync();
+
+        return new FolderLoadStats
+        {
+            AccountId = accountId,
+            Folder = folder,
+            TotalCount = reader.IsDBNull(0) ? 0 : reader.GetInt32(0),
+            VisibleCount = reader.IsDBNull(1) ? 0 : reader.GetInt32(1),
+            SoftDeletedCount = reader.IsDBNull(2) ? 0 : reader.GetInt32(2),
+            BodyUnavailableCount = reader.IsDBNull(3) ? 0 : reader.GetInt32(3)
+        };
     }
 
     public async Task<IList<EmailMessage>> GetEmailsAsync(string? accountId, string folder, int limit = 100, int offset = 0)
@@ -261,9 +434,13 @@ public sealed class SqliteEmailRepository : IEmailRepository
                        ) THEN Body
                        ELSE ''
                    END,
-                   IsRead
+                   IsRead,
+                   BodyUnavailable,
+                   DeletedOnServer
             FROM Emails
             WHERE HasBody = 0
+              AND COALESCE(BodyUnavailable, 0) = 0
+              AND COALESCE(DeletedOnServer, 0) = 0
             ORDER BY Date DESC, Uid DESC
             LIMIT $limit;
             """;
@@ -329,7 +506,9 @@ public sealed class SqliteEmailRepository : IEmailRepository
                        ) THEN Body
                        ELSE ''
                    END,
-                   IsRead
+                   IsRead,
+                   BodyUnavailable,
+                   DeletedOnServer
             FROM Emails
             WHERE Id = $id
             LIMIT 1;
@@ -373,16 +552,17 @@ public sealed class SqliteEmailRepository : IEmailRepository
         command.Transaction = (SqliteTransaction)transaction;
         command.CommandText =
             """
-            INSERT INTO Accounts (Id, DisplayName, Email, ImapHost, ImapPort, Username, Password, IsActive)
-            VALUES ($id, $displayName, $email, $imapHost, $imapPort, $username, $password, $isActive)
+            INSERT INTO Accounts (Id, DisplayName, Email, ImapHost, ImapPort, Username, Password, IsActive, PreferredFolder)
+            VALUES ($id, $displayName, $email, $imapHost, $imapPort, $username, '', $isActive, $preferredFolder)
             ON CONFLICT(Id) DO UPDATE SET
                 DisplayName = excluded.DisplayName,
                 Email = excluded.Email,
                 ImapHost = excluded.ImapHost,
                 ImapPort = excluded.ImapPort,
                 Username = excluded.Username,
-                Password = excluded.Password,
-                IsActive = excluded.IsActive;
+                Password = '',
+                IsActive = excluded.IsActive,
+                PreferredFolder = excluded.PreferredFolder;
             """;
         command.Parameters.AddWithValue("$id", account.Id);
         command.Parameters.AddWithValue("$displayName", account.DisplayName);
@@ -390,10 +570,12 @@ public sealed class SqliteEmailRepository : IEmailRepository
         command.Parameters.AddWithValue("$imapHost", account.ImapHost);
         command.Parameters.AddWithValue("$imapPort", account.ImapPort);
         command.Parameters.AddWithValue("$username", account.Username);
-        command.Parameters.AddWithValue("$password", account.Password);
         command.Parameters.AddWithValue("$isActive", account.IsActive ? 1 : 0);
+        command.Parameters.AddWithValue("$preferredFolder", account.PreferredFolder ?? string.Empty);
 
         await command.ExecuteNonQueryAsync();
+        await _secretStore.SetPasswordAsync(account.Id, account.Password);
+        Console.WriteLine($"[Secrets] Stored password outside SQLite for account '{account.Id}' via '{_secretStore.GetType().Name}'.");
 
         if (!account.IsActive)
         {
@@ -419,24 +601,18 @@ public sealed class SqliteEmailRepository : IEmailRepository
 
     public async Task<IList<MailAccount>> GetAccountsAsync()
     {
-        await using var connection = CreateConnection();
-        await connection.OpenAsync();
-
-        await using var command = connection.CreateCommand();
-        command.CommandText =
+        var records = await LoadAccountRecordsAsync(
             """
-            SELECT Id, DisplayName, Email, ImapHost, ImapPort, Username, Password, IsActive
+            SELECT Id, DisplayName, Email, ImapHost, ImapPort, Username, Password, IsActive, PreferredFolder
             FROM Accounts
             ORDER BY IsActive DESC, Email;
-            """;
+            """);
 
-        var accounts = new List<MailAccount>();
+        var accounts = new List<MailAccount>(records.Count);
 
-        await using var reader = await command.ExecuteReaderAsync();
-
-        while (await reader.ReadAsync())
+        foreach (var record in records)
         {
-            accounts.Add(MapAccount(reader));
+            accounts.Add(await HydrateAccountAsync(record));
         }
 
         return accounts;
@@ -444,53 +620,69 @@ public sealed class SqliteEmailRepository : IEmailRepository
 
     public async Task<MailAccount?> GetActiveAccountAsync()
     {
+        var records = await LoadAccountRecordsAsync(
+            """
+            SELECT Id, DisplayName, Email, ImapHost, ImapPort, Username, Password, IsActive, PreferredFolder
+            FROM Accounts
+            ORDER BY IsActive DESC, Email
+            LIMIT 1;
+            """);
+
+        return records.Count == 0 ? null : await HydrateAccountAsync(records[0]);
+    }
+
+    public async Task<IList<string>> GetKnownFoldersAsync(string accountId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(accountId);
+
         await using var connection = CreateConnection();
         await connection.OpenAsync();
 
         await using var command = connection.CreateCommand();
         command.CommandText =
             """
-            SELECT Id, DisplayName, Email, ImapHost, ImapPort, Username, Password, IsActive
-            FROM Accounts
-            ORDER BY IsActive DESC, Email
-            LIMIT 1;
-            """;
+            SELECT DISTINCT Folder
+            FROM (
+                SELECT Folder
+                FROM Emails
+                WHERE AccountId = $accountId
 
+                UNION
+
+                SELECT Folder
+                FROM SyncState
+                WHERE AccountId = $accountId
+            )
+            WHERE COALESCE(TRIM(Folder), '') <> ''
+            ORDER BY CASE WHEN UPPER(Folder) = 'INBOX' THEN 0 ELSE 1 END, Folder;
+            """;
+        command.Parameters.AddWithValue("$accountId", accountId);
+
+        var folders = new List<string>();
         await using var reader = await command.ExecuteReaderAsync();
 
-        if (!await reader.ReadAsync())
+        while (await reader.ReadAsync())
         {
-            return null;
+            folders.Add(reader.GetString(0));
         }
 
-        return MapAccount(reader);
+        return folders;
     }
 
     public async Task<MailAccount?> GetAccountAsync(string id)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(id);
 
-        await using var connection = CreateConnection();
-        await connection.OpenAsync();
-
-        await using var command = connection.CreateCommand();
-        command.CommandText =
+        var records = await LoadAccountRecordsAsync(
             """
-            SELECT Id, DisplayName, Email, ImapHost, ImapPort, Username, Password, IsActive
+            SELECT Id, DisplayName, Email, ImapHost, ImapPort, Username, Password, IsActive, PreferredFolder
             FROM Accounts
             WHERE Id = $id
             LIMIT 1;
-            """;
-        command.Parameters.AddWithValue("$id", id);
+            """,
+            ("$id", id));
 
-        await using var reader = await command.ExecuteReaderAsync();
-
-        if (!await reader.ReadAsync())
-        {
-            return null;
-        }
-
-        return MapAccount(reader);
+        return records.Count == 0 ? null : await HydrateAccountAsync(records[0]);
     }
 
     public async Task SetActiveAccountAsync(string id)
@@ -523,6 +715,27 @@ public sealed class SqliteEmailRepository : IEmailRepository
         await activateCommand.ExecuteNonQueryAsync();
 
         await transaction.CommitAsync();
+    }
+
+    public async Task SetPreferredFolderAsync(string accountId, string folder)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(accountId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(folder);
+
+        await using var connection = CreateConnection();
+        await connection.OpenAsync();
+
+        await using var command = connection.CreateCommand();
+        command.CommandText =
+            """
+            UPDATE Accounts
+            SET PreferredFolder = $folder
+            WHERE Id = $accountId;
+            """;
+        command.Parameters.AddWithValue("$accountId", accountId);
+        command.Parameters.AddWithValue("$folder", folder);
+
+        await command.ExecuteNonQueryAsync();
     }
 
     public async Task SaveFolderStateAsync(FolderState state)
@@ -630,6 +843,8 @@ public sealed class SqliteEmailRepository : IEmailRepository
                 TextBody TEXT,
                 HtmlBody TEXT,
                 HasBody INTEGER NOT NULL,
+                BodyUnavailable INTEGER NOT NULL DEFAULT 0,
+                DeletedOnServer INTEGER NOT NULL DEFAULT 0,
                 IsRead INTEGER NOT NULL DEFAULT 0,
                 Folder TEXT NOT NULL,
                 Uid INTEGER NOT NULL
@@ -649,7 +864,8 @@ public sealed class SqliteEmailRepository : IEmailRepository
                 ImapPort INTEGER,
                 Username TEXT,
                 Password TEXT,
-                IsActive INTEGER NOT NULL DEFAULT 0
+                IsActive INTEGER NOT NULL DEFAULT 0,
+                PreferredFolder TEXT
             );
 
             CREATE TABLE IF NOT EXISTS SyncState (
@@ -663,11 +879,14 @@ public sealed class SqliteEmailRepository : IEmailRepository
 
         command.ExecuteNonQuery();
         EnsureColumnExists(connection, "Emails", "IsRead", "INTEGER NOT NULL DEFAULT 0");
+        EnsureColumnExists(connection, "Emails", "BodyUnavailable", "INTEGER NOT NULL DEFAULT 0");
+        EnsureColumnExists(connection, "Emails", "DeletedOnServer", "INTEGER NOT NULL DEFAULT 0");
         EnsureColumnExists(connection, "Emails", "TextBody", "TEXT");
         EnsureColumnExists(connection, "Emails", "HtmlBody", "TEXT");
         EnsureColumnExists(connection, "Accounts", "DisplayName", "TEXT");
         EnsureColumnExists(connection, "Accounts", "Password", "TEXT");
         EnsureColumnExists(connection, "Accounts", "IsActive", "INTEGER NOT NULL DEFAULT 0");
+        EnsureColumnExists(connection, "Accounts", "PreferredFolder", "TEXT");
         MigrateLegacyBodyColumn(connection);
         EnsureSingleActiveAccount(connection);
     }
@@ -726,11 +945,15 @@ public sealed class SqliteEmailRepository : IEmailRepository
                              ) THEN Body
                              ELSE ''
                          END,
-                         IsRead
+                         IsRead,
+                         BodyUnavailable,
+                         DeletedOnServer
                   FROM Emails
                   WHERE ($accountId IS NULL OR AccountId = $accountId)
                     AND UPPER(Folder) = UPPER($folder)
                     AND HasBody = 0
+                    AND COALESCE(BodyUnavailable, 0) = 0
+                    AND COALESCE(DeletedOnServer, 0) = 0
                   ORDER BY Date DESC, Uid DESC
                   LIMIT $limit;
                   """
@@ -765,7 +988,9 @@ public sealed class SqliteEmailRepository : IEmailRepository
                              ) THEN Body
                              ELSE ''
                          END,
-                         IsRead
+                         IsRead,
+                         BodyUnavailable,
+                         DeletedOnServer
                   FROM Emails
                   WHERE ($accountId IS NULL OR AccountId = $accountId)
                     AND UPPER(Folder) = UPPER($folder)
@@ -814,8 +1039,15 @@ public sealed class SqliteEmailRepository : IEmailRepository
             HasBody = reader.GetInt64(7) == 1,
             TextBody = GetString(reader, 8),
             HtmlBody = GetString(reader, 9),
-            IsRead = reader.GetInt64(10) == 1
+            IsRead = reader.GetInt64(10) == 1,
+            BodyUnavailable = !reader.IsDBNull(11) && reader.GetInt64(11) == 1,
+            DeletedOnServer = !reader.IsDBNull(12) && reader.GetInt64(12) == 1
         };
+    }
+
+    private static string SerializeUInts(IReadOnlyCollection<uint> values)
+    {
+        return $"[{string.Join(',', values)}]";
     }
 
     private static string GetString(SqliteDataReader reader, int ordinal)
@@ -823,19 +1055,95 @@ public sealed class SqliteEmailRepository : IEmailRepository
         return reader.IsDBNull(ordinal) ? string.Empty : reader.GetString(ordinal);
     }
 
-    private static MailAccount MapAccount(SqliteDataReader reader)
+    private async Task<List<AccountRecord>> LoadAccountRecordsAsync(string sql, params (string Name, object? Value)[] parameters)
     {
+        await using var connection = CreateConnection();
+        await connection.OpenAsync();
+
+        await using var command = connection.CreateCommand();
+        command.CommandText = sql;
+
+        foreach (var (name, value) in parameters)
+        {
+            command.Parameters.AddWithValue(name, value ?? DBNull.Value);
+        }
+
+        var accounts = new List<AccountRecord>();
+        await using var reader = await command.ExecuteReaderAsync();
+
+        while (await reader.ReadAsync())
+        {
+            accounts.Add(new AccountRecord(
+                GetString(reader, 0),
+                GetString(reader, 1),
+                GetString(reader, 2),
+                GetString(reader, 3),
+                reader.IsDBNull(4) ? 0 : reader.GetInt32(4),
+                GetString(reader, 5),
+                GetString(reader, 6),
+                !reader.IsDBNull(7) && reader.GetInt64(7) == 1,
+                GetString(reader, 8)));
+        }
+
+        return accounts;
+    }
+
+    private async Task<MailAccount> HydrateAccountAsync(AccountRecord record)
+    {
+        var password = await _secretStore.GetPasswordAsync(record.Id);
+
+        if (string.IsNullOrWhiteSpace(password) && !string.IsNullOrWhiteSpace(record.LegacyPassword))
+        {
+            password = record.LegacyPassword;
+            await _secretStore.SetPasswordAsync(record.Id, password);
+
+            var migratedPassword = await _secretStore.GetPasswordAsync(record.Id);
+
+            if (string.Equals(migratedPassword, password, StringComparison.Ordinal))
+            {
+                Console.WriteLine($"[Secrets] Migrated legacy SQLite password for account '{record.Id}' to '{_secretStore.GetType().Name}'.");
+                await ClearLegacyPasswordAsync(record.Id);
+            }
+            else
+            {
+                Console.WriteLine($"[Secrets] Legacy password for account '{record.Id}' could not be verified in '{_secretStore.GetType().Name}'. SQLite fallback was preserved.");
+            }
+        }
+        else if (!string.IsNullOrWhiteSpace(password) && !string.IsNullOrWhiteSpace(record.LegacyPassword))
+        {
+            Console.WriteLine($"[Secrets] Clearing legacy SQLite password for account '{record.Id}' after secure-store lookup succeeded.");
+            await ClearLegacyPasswordAsync(record.Id);
+        }
+
         return new MailAccount
         {
-            Id = GetString(reader, 0),
-            DisplayName = GetString(reader, 1),
-            Email = GetString(reader, 2),
-            ImapHost = GetString(reader, 3),
-            ImapPort = reader.IsDBNull(4) ? 0 : reader.GetInt32(4),
-            Username = GetString(reader, 5),
-            Password = GetString(reader, 6),
-            IsActive = !reader.IsDBNull(7) && reader.GetInt64(7) == 1
+            Id = record.Id,
+            DisplayName = record.DisplayName,
+            Email = record.Email,
+            ImapHost = record.ImapHost,
+            ImapPort = record.ImapPort,
+            Username = record.Username,
+            Password = password ?? string.Empty,
+            IsActive = record.IsActive,
+            PreferredFolder = record.PreferredFolder
         };
+    }
+
+    private async Task ClearLegacyPasswordAsync(string accountId)
+    {
+        await using var connection = CreateConnection();
+        await connection.OpenAsync();
+
+        await using var command = connection.CreateCommand();
+        command.CommandText =
+            """
+            UPDATE Accounts
+            SET Password = ''
+            WHERE Id = $id
+              AND COALESCE(Password, '') <> '';
+            """;
+        command.Parameters.AddWithValue("$id", accountId);
+        await command.ExecuteNonQueryAsync();
     }
 
     private static void EnsureColumnExists(SqliteConnection connection, string tableName, string columnName, string columnDefinition)
@@ -919,4 +1227,15 @@ public sealed class SqliteEmailRepository : IEmailRepository
             """;
         command.ExecuteNonQuery();
     }
+
+    private sealed record AccountRecord(
+        string Id,
+        string DisplayName,
+        string Email,
+        string ImapHost,
+        int ImapPort,
+        string Username,
+        string LegacyPassword,
+        bool IsActive,
+        string PreferredFolder);
 }

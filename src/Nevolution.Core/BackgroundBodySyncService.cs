@@ -7,15 +7,16 @@ public sealed class BackgroundBodySyncService
 {
     private readonly IMailClient _mailClient;
     private readonly IEmailRepository _emailRepository;
-    private readonly SemaphoreSlim _imapLock = new(1, 1);
+    private readonly ImapOperationCoordinator _imapOperationCoordinator;
     private readonly object _inFlightLock = new();
     private readonly Dictionary<string, Task<EmailBody>> _inFlightDownloads = [];
     private readonly Dictionary<string, ImapConnectionException> _blockedAccounts = [];
 
-    public BackgroundBodySyncService(IMailClient mailClient, IEmailRepository emailRepository)
+    public BackgroundBodySyncService(IMailClient mailClient, IEmailRepository emailRepository, ImapOperationCoordinator imapOperationCoordinator)
     {
         _mailClient = mailClient;
         _emailRepository = emailRepository;
+        _imapOperationCoordinator = imapOperationCoordinator;
     }
 
     public event Action<string, EmailBody>? BodyDownloaded;
@@ -105,18 +106,38 @@ public sealed class BackgroundBodySyncService
             };
         }
 
+        if (email.BodyUnavailable)
+        {
+            Console.WriteLine(
+                $"[IMAP] skip missing message operation=body_download accountId={account.Id} folder={email.Folder} uid={email.ImapUid} emailId={email.Id}");
+            return new EmailBody();
+        }
+
+        if (email.DeletedOnServer)
+        {
+            Console.WriteLine(
+                $"[IMAP] skip deleted message operation=body_download accountId={account.Id} folder={email.Folder} uid={email.ImapUid} emailId={email.Id}");
+            return new EmailBody();
+        }
+
         var persistedEmail = await _emailRepository.GetEmailAsync(email.Id);
 
         if (persistedEmail is not null
             && (persistedEmail.HasBody
                 || !string.IsNullOrWhiteSpace(persistedEmail.TextBody)
-                || !string.IsNullOrWhiteSpace(persistedEmail.HtmlBody)))
+                || !string.IsNullOrWhiteSpace(persistedEmail.HtmlBody)
+                || persistedEmail.BodyUnavailable))
         {
             return new EmailBody
             {
                 TextBody = persistedEmail.TextBody,
                 HtmlBody = persistedEmail.HtmlBody
             };
+        }
+
+        if (persistedEmail?.DeletedOnServer == true)
+        {
+            return new EmailBody();
         }
 
         Task<EmailBody> downloadTask;
@@ -136,7 +157,7 @@ public sealed class BackgroundBodySyncService
 
         try
         {
-            return await downloadTask;
+            return await downloadTask.WaitAsync(cancellationToken);
         }
         finally
         {
@@ -157,8 +178,6 @@ public sealed class BackgroundBodySyncService
         EmailMessage email,
         CancellationToken cancellationToken)
     {
-        await _imapLock.WaitAsync(cancellationToken);
-
         try
         {
             var persistedEmail = await _emailRepository.GetEmailAsync(email.Id);
@@ -166,7 +185,8 @@ public sealed class BackgroundBodySyncService
             if (persistedEmail is not null
                 && (persistedEmail.HasBody
                     || !string.IsNullOrWhiteSpace(persistedEmail.TextBody)
-                    || !string.IsNullOrWhiteSpace(persistedEmail.HtmlBody)))
+                    || !string.IsNullOrWhiteSpace(persistedEmail.HtmlBody)
+                    || persistedEmail.BodyUnavailable))
             {
                 return new EmailBody
                 {
@@ -175,8 +195,18 @@ public sealed class BackgroundBodySyncService
                 };
             }
 
+            if (persistedEmail?.DeletedOnServer == true)
+            {
+                return new EmailBody();
+            }
+
             var folder = string.IsNullOrWhiteSpace(email.Folder) ? "INBOX" : email.Folder;
-            var body = await _mailClient.GetBodyAsync(account, folder, email.ImapUid);
+            var body = await _imapOperationCoordinator.RunAsync(
+                account,
+                "body_download",
+                folder,
+                token => _mailClient.GetBodyAsync(account, folder, email.ImapUid, token),
+                cancellationToken);
             ClearBlockedAccount(account);
 
             if (!body.HasContent)
@@ -198,9 +228,14 @@ public sealed class BackgroundBodySyncService
             NotifyDownloadFailed(exception);
             throw;
         }
-        finally
+        catch (ImapMessageNotFoundException)
         {
-            _imapLock.Release();
+            await _emailRepository.MarkBodyUnavailableAsync(email.Id);
+            email.BodyUnavailable = true;
+
+            Console.WriteLine(
+                $"[IMAP] message missing operation=body_download accountId={account.Id} folder={email.Folder} uid={email.ImapUid} emailId={email.Id}");
+            return new EmailBody();
         }
     }
 

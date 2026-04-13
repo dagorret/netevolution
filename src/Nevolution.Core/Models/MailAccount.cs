@@ -21,4 +21,6 @@ public sealed class MailAccount
     public string Password { get; set; } = string.Empty;
 
     public bool IsActive { get; set; }
+
+    public string PreferredFolder { get; set; } = string.Empty;
 }

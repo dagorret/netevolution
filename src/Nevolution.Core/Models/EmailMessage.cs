@@ -6,6 +6,8 @@ namespace Nevolution.Core.Models;
 public sealed class EmailMessage : INotifyPropertyChanged
 {
     private bool _hasBody;
+    private bool _bodyUnavailable;
+    private bool _deletedOnServer;
     private bool _isRead;
     private string _textBody = string.Empty;
     private string _htmlBody = string.Empty;
@@ -52,6 +54,36 @@ public sealed class EmailMessage : INotifyPropertyChanged
             }
 
             _hasBody = value;
+            OnPropertyChanged();
+        }
+    }
+
+    public bool BodyUnavailable
+    {
+        get => _bodyUnavailable;
+        set
+        {
+            if (_bodyUnavailable == value)
+            {
+                return;
+            }
+
+            _bodyUnavailable = value;
+            OnPropertyChanged();
+        }
+    }
+
+    public bool DeletedOnServer
+    {
+        get => _deletedOnServer;
+        set
+        {
+            if (_deletedOnServer == value)
+            {
+                return;
+            }
+
+            _deletedOnServer = value;
             OnPropertyChanged();
         }
     }

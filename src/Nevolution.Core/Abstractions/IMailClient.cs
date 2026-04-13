@@ -4,13 +4,9 @@ namespace Nevolution.Core.Abstractions;
 
 public interface IMailClient
 {
-    Task ConnectAsync(MailAccount account);
-
     Task<IReadOnlyList<MailFolderInfo>> GetKnownFoldersAsync(MailAccount account);
 
-    Task<uint> GetUidValidityAsync(string folder);
+    Task<SyncHeadersResult> SyncHeadersAsync(MailAccount account, string folder, uint fromUid, CancellationToken cancellationToken = default);
 
-    Task<IList<EmailMessage>> FetchHeadersAsync(string folder, uint fromUid);
-
-    Task<EmailBody> GetBodyAsync(MailAccount account, string folder, uint uid);
+    Task<EmailBody> GetBodyAsync(MailAccount account, string folder, uint uid, CancellationToken cancellationToken = default);
 }

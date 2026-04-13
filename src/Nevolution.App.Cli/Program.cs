@@ -1,7 +1,10 @@
+using Microsoft.Extensions.DependencyInjection;
 using Nevolution.Core;
+using Nevolution.Core.Abstractions;
 using Nevolution.Core.Localization;
 using Nevolution.Core.Models;
 using Nevolution.Core.Resources;
+using Nevolution.Infrastructure.DependencyInjection;
 using Nevolution.Infrastructure.Mail;
 using Nevolution.Infrastructure.Persistence;
 using System.Net;
@@ -23,7 +26,8 @@ internal static class Program
         var databasePath = Path.Combine(dataDir, "mail.db");
         Console.WriteLine($"DB PATH: {databasePath}");
 
-        var repository = new SqliteEmailRepository(databasePath);
+        using var services = ConfigureServices(databasePath).BuildServiceProvider();
+        var repository = services.GetRequiredService<SqliteEmailRepository>();
 
         if (args.Length > 0 && string.Equals(args[0], "account", StringComparison.OrdinalIgnoreCase))
         {
@@ -132,8 +136,9 @@ internal static class Program
             var folderOption = GetOption(args, "--folder") ?? DefaultFolder;
             var mailClient = new MailKitClient();
             var bodyMailClient = new MailKitClient();
-            var syncService = new SyncService(mailClient, repository);
-            var bodySyncService = new BackgroundBodySyncService(bodyMailClient, repository);
+            var imapOperationCoordinator = new ImapOperationCoordinator();
+            var syncService = new SyncService(mailClient, repository, imapOperationCoordinator);
+            var bodySyncService = new BackgroundBodySyncService(bodyMailClient, repository, imapOperationCoordinator);
             var folders = await mailClient.GetKnownFoldersAsync(account);
             var folder = ResolveFolder(folderOption, folders).ImapFolderName;
 
@@ -146,11 +151,12 @@ internal static class Program
             }
 
             Console.WriteLine(string.Format(Strings.Cli_SyncingFolder, folder, account.Email));
-            await syncService.SyncFolderAsync(account, folder);
+            var syncResult = await syncService.SyncFolderAsync(account, folder);
             await bodySyncService.DownloadMissingBodiesAsync(account, folder, batchSize: 25);
 
             var emails = await repository.GetEmailsAsync(account.Id, folder, 500);
             Console.WriteLine(string.Format(Strings.Cli_SyncedEmailsCount, emails.Count));
+            Console.WriteLine($"SYNC DETAIL: fetchedHeaders={syncResult.FetchedHeadersCount}, previousLastUid={syncResult.PreviousLastUid}, newLastUid={syncResult.NewLastUid}, resetFolder={syncResult.ResetFolder}, softDeleted={syncResult.SoftDeletedCount}, restored={syncResult.RestoredCount}, backfillTriggered={syncResult.BackfillTriggered}, backfilledHeaders={syncResult.BackfilledHeadersCount}, localVisibleBefore={syncResult.LocalVisibleCountBefore}, localVisibleAfter={syncResult.LocalVisibleCountAfter}, serverUidSnapshotCount={syncResult.ServerVisibleCount}");
 
             return 0;
         }
@@ -280,5 +286,13 @@ internal static class Program
         }
 
         return Path.Combine(dir.FullName, "data");
+    }
+
+    private static ServiceCollection ConfigureServices(string databasePath)
+    {
+        var services = new ServiceCollection();
+        services.AddNevolutionSecretStore();
+        services.AddSingleton(sp => new SqliteEmailRepository(databasePath, sp.GetRequiredService<ISecretStore>()));
+        return services;
     }
 }
